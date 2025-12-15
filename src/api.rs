@@ -111,6 +111,7 @@ impl<Writer> MuxerBuilder<Writer> {
             audio_track,
             first_video_pts: None,
             last_audio_pts: None,
+            finished: false,
         })
     }
 }
@@ -148,6 +149,7 @@ pub struct Muxer<Writer> {
     audio_track: Option<AudioTrackConfig>,
     first_video_pts: Option<u64>,
     last_audio_pts: Option<u64>,
+    finished: bool,
 }
 
 /// Error type for builder validation and runtime errors.
@@ -205,6 +207,9 @@ impl<Writer: Write> Muxer<Writer> {
         data: &[u8],
         is_keyframe: bool,
     ) -> Result<(), MuxerError> {
+        if self.finished {
+            return Err(MuxerError::Other("muxer already finished".into()));
+        }
         if pts < 0.0 {
             return Err(MuxerError::Other("video pts must be non-negative".into()));
         }
@@ -225,6 +230,9 @@ impl<Writer: Write> Muxer<Writer> {
     /// audio is optional and must have the same timescale as video when
     /// present.
     pub fn write_audio(&mut self, pts: f64, data: &[u8]) -> Result<(), MuxerError> {
+        if self.finished {
+            return Err(MuxerError::Other("muxer already finished".into()));
+        }
         if self.audio_track.is_none() {
             return Err(MuxerError::Other("audio track not configured".into()));
         }
@@ -267,12 +275,20 @@ impl<Writer: Write> Muxer<Writer> {
     ///
     /// In the current slice this writes the `ftyp`/`moov` boxes, resulting
     /// in a minimal MP4 header that can be inspected by the slice 02 tests.
-    pub fn finish(self) -> Result<(), MuxerError> {
+    pub fn finish_in_place(&mut self) -> Result<(), MuxerError> {
+        if self.finished {
+            return Err(MuxerError::Other("muxer already finished".into()));
+        }
         let params = Mp4VideoTrack {
             width: self.video_track.width,
             height: self.video_track.height,
         };
         self.writer.finalize(&params)?;
+        self.finished = true;
         Ok(())
+    }
+
+    pub fn finish(mut self) -> Result<(), MuxerError> {
+        self.finish_in_place()
     }
 }

@@ -16,6 +16,7 @@ pub struct Mp4Writer<Writer> {
     audio_samples: Vec<SampleInfo>,
     audio_prev_pts: Option<u64>,
     audio_last_delta: Option<u32>,
+    finalized: bool,
 }
 
 /// Simplified video track information used when writing the header.
@@ -105,6 +106,8 @@ pub enum Mp4WriterError {
     AudioNotEnabled,
     /// Computed sample duration overflowed a `u32`.
     DurationOverflow,
+    /// The writer has already been finalised.
+    AlreadyFinalized,
 }
 
 impl fmt::Display for Mp4WriterError {
@@ -120,6 +123,7 @@ impl fmt::Display for Mp4WriterError {
             Mp4WriterError::InvalidAdts => write!(f, "invalid ADTS frame"),
             Mp4WriterError::AudioNotEnabled => write!(f, "audio track not enabled"),
             Mp4WriterError::DurationOverflow => write!(f, "sample duration overflow"),
+            Mp4WriterError::AlreadyFinalized => write!(f, "writer already finalised"),
         }
     }
 }
@@ -138,6 +142,7 @@ impl<Writer: Write> Mp4Writer<Writer> {
             audio_samples: Vec::new(),
             audio_prev_pts: None,
             audio_last_delta: None,
+            finalized: false,
         }
     }
 
@@ -152,6 +157,9 @@ impl<Writer: Write> Mp4Writer<Writer> {
         data: &[u8],
         is_keyframe: bool,
     ) -> Result<(), Mp4WriterError> {
+        if self.finalized {
+            return Err(Mp4WriterError::AlreadyFinalized);
+        }
         if let Some(prev) = self.video_prev_pts {
             if pts <= prev {
                 return Err(Mp4WriterError::NonIncreasingTimestamp);
@@ -190,6 +198,9 @@ impl<Writer: Write> Mp4Writer<Writer> {
     }
 
     pub fn write_audio_sample(&mut self, pts: u64, data: &[u8]) -> Result<(), Mp4WriterError> {
+        if self.finalized {
+            return Err(Mp4WriterError::AlreadyFinalized);
+        }
         if self.audio_track.is_none() {
             return Err(Mp4WriterError::AudioNotEnabled);
         }
@@ -225,7 +236,14 @@ impl<Writer: Write> Mp4Writer<Writer> {
     }
 
     /// Finalises the MP4 file by writing the header boxes and sample data.
-    pub fn finalize(mut self, video: &Mp4VideoTrack) -> io::Result<()> {
+    pub fn finalize(&mut self, video: &Mp4VideoTrack) -> io::Result<()> {
+        if self.finalized {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "mp4 writer already finalised",
+            ));
+        }
+        self.finalized = true;
         let ftyp_box = build_ftyp_box();
         let ftyp_len = ftyp_box.len() as u32;
         self.writer.write_all(&ftyp_box)?;
