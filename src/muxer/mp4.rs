@@ -1,6 +1,8 @@
 use std::fmt;
 use std::io::{self, Write};
 
+use crate::api::Metadata;
+
 const DEFAULT_SPS_NAL: &[u8] = &[0x67, 0x42, 0x00, 0x1e, 0xda, 0x02, 0x80, 0x2d, 0x8b, 0x11];
 const DEFAULT_PPS_NAL: &[u8] = &[0x68, 0xce, 0x38, 0x80];
 
@@ -44,6 +46,7 @@ pub struct Mp4AudioTrack {
 
 struct SampleInfo {
     pts: u64,
+    dts: u64,  // Decode time (for B-frames: dts != pts)
     data: Vec<u8>,
     is_keyframe: bool,
     duration: Option<u32>,
@@ -55,6 +58,8 @@ struct SampleTables {
     keyframes: Vec<u32>,
     chunk_offsets: Vec<u32>,
     samples_per_chunk: u32,
+    cts_offsets: Vec<i32>,  // Composition time offsets (pts - dts) for ctts box
+    has_bframes: bool,       // True if any sample has pts != dts
 }
 
 impl SampleTables {
@@ -91,6 +96,20 @@ impl SampleTables {
                 }
             })
             .collect();
+        
+        // Compute composition time offsets (cts = pts - dts)
+        let mut has_bframes = false;
+        let cts_offsets: Vec<i32> = samples
+            .iter()
+            .map(|sample| {
+                let offset = (sample.pts as i64 - sample.dts as i64) as i32;
+                if offset != 0 {
+                    has_bframes = true;
+                }
+                offset
+            })
+            .collect();
+        
         let _ = sample_count;
         Self {
             durations,
@@ -98,6 +117,8 @@ impl SampleTables {
             keyframes,
             chunk_offsets,
             samples_per_chunk,
+            cts_offsets,
+            has_bframes,
         }
     }
 }
@@ -163,6 +184,10 @@ impl<Writer: Write> Mp4Writer<Writer> {
         self.video_samples.len() as u64
     }
 
+    pub(crate) fn audio_sample_count(&self) -> u64 {
+        self.audio_samples.len() as u64
+    }
+
     pub(crate) fn bytes_written(&self) -> u64 {
         self.bytes_written
     }
@@ -194,20 +219,35 @@ impl<Writer: Write> Mp4Writer<Writer> {
     }
 
     /// Queues a video sample for later `mdat` emission.
+    /// For backward compatibility, dts is assumed equal to pts.
     pub fn write_video_sample(
         &mut self,
         pts: u64,
         data: &[u8],
         is_keyframe: bool,
     ) -> Result<(), Mp4WriterError> {
+        self.write_video_sample_with_dts(pts, pts, data, is_keyframe)
+    }
+
+    /// Queues a video sample with explicit DTS for B-frame support.
+    /// - `pts`: Presentation timestamp (display order)
+    /// - `dts`: Decode timestamp (decode order) - must be monotonically increasing
+    pub fn write_video_sample_with_dts(
+        &mut self,
+        pts: u64,
+        dts: u64,
+        data: &[u8],
+        is_keyframe: bool,
+    ) -> Result<(), Mp4WriterError> {
         if self.finalized {
             return Err(Mp4WriterError::AlreadyFinalized);
         }
+        // DTS must be monotonically increasing (decode order)
         if let Some(prev) = self.video_prev_pts {
-            if pts <= prev {
+            if dts <= prev {
                 return Err(Mp4WriterError::NonIncreasingTimestamp);
             }
-            let delta = pts - prev;
+            let delta = dts - prev;
             if delta > u64::from(u32::MAX) {
                 return Err(Mp4WriterError::DurationOverflow);
             }
@@ -234,11 +274,12 @@ impl<Writer: Write> Mp4Writer<Writer> {
 
         self.video_samples.push(SampleInfo {
             pts,
+            dts,
             data: converted,
             is_keyframe,
             duration: None,
         });
-        self.video_prev_pts = Some(pts);
+        self.video_prev_pts = Some(dts);  // Track DTS for monotonic check
         Ok(())
     }
 
@@ -272,6 +313,7 @@ impl<Writer: Write> Mp4Writer<Writer> {
 
         self.audio_samples.push(SampleInfo {
             pts,
+            dts: pts,  // Audio: dts == pts (no B-frames in AAC)
             data: raw.to_vec(),
             is_keyframe: false,
             duration: None,
@@ -281,7 +323,7 @@ impl<Writer: Write> Mp4Writer<Writer> {
     }
 
     /// Finalises the MP4 file by writing the header boxes and sample data.
-    pub fn finalize(&mut self, video: &Mp4VideoTrack) -> io::Result<()> {
+    pub fn finalize(&mut self, video: &Mp4VideoTrack, metadata: Option<&Metadata>, fast_start: bool) -> io::Result<()> {
         if self.finalized {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
@@ -290,20 +332,25 @@ impl<Writer: Write> Mp4Writer<Writer> {
         }
         self.finalized = true;
 
-        let writer = &mut self.writer;
-        let bytes_written = &mut self.bytes_written;
-
-        let ftyp_box = build_ftyp_box();
-        let ftyp_len = ftyp_box.len() as u32;
-        Self::write_counted(writer, bytes_written, &ftyp_box)?;
-
-        let audio_present = self.audio_track.is_some();
-
         let avc_config = self
             .video_avc_config
             .clone()
             .or_else(|| if self.video_samples.is_empty() { Some(default_avc_config()) } else { None })
             .unwrap_or_else(default_avc_config);
+
+        if fast_start {
+            self.finalize_fast_start(video, metadata, &avc_config)
+        } else {
+            self.finalize_standard(video, metadata, &avc_config)
+        }
+    }
+
+    fn finalize_standard(&mut self, video: &Mp4VideoTrack, metadata: Option<&Metadata>, avc_config: &AvcConfig) -> io::Result<()> {
+        let ftyp_box = build_ftyp_box();
+        let ftyp_len = ftyp_box.len() as u32;
+        Self::write_counted(&mut self.writer, &mut self.bytes_written, &ftyp_box)?;
+
+        let audio_present = self.audio_track.is_some();
 
         if !audio_present {
             let chunk_offset = if !self.video_samples.is_empty() {
@@ -313,10 +360,10 @@ impl<Writer: Write> Mp4Writer<Writer> {
                 }
 
                 let mdat_size = 8 + payload_size;
-                Self::write_counted(writer, bytes_written, &mdat_size.to_be_bytes())?;
-                Self::write_counted(writer, bytes_written, b"mdat")?;
+                Self::write_counted(&mut self.writer, &mut self.bytes_written, &mdat_size.to_be_bytes())?;
+                Self::write_counted(&mut self.writer, &mut self.bytes_written, b"mdat")?;
                 for sample in &self.video_samples {
-                    Self::write_counted(writer, bytes_written, &sample.data)?;
+                    Self::write_counted(&mut self.writer, &mut self.bytes_written, &sample.data)?;
                 }
                 Some(ftyp_len + 8)
             } else {
@@ -334,10 +381,11 @@ impl<Writer: Write> Mp4Writer<Writer> {
                 samples_per_chunk,
                 self.video_last_delta,
             );
-            let moov_box = build_moov_box(video, &tables, None, &avc_config);
-            return Self::write_counted(writer, bytes_written, &moov_box);
+            let moov_box = build_moov_box(video, &tables, None, avc_config, metadata);
+            return Self::write_counted(&mut self.writer, &mut self.bytes_written, &moov_box);
         }
 
+        // Audio present - write interleaved mdat then moov
         let mut total_payload_size: u32 = 0;
         for sample in &self.video_samples {
             total_payload_size += sample.data.len() as u32;
@@ -347,33 +395,14 @@ impl<Writer: Write> Mp4Writer<Writer> {
         }
 
         let mdat_size = 8 + total_payload_size;
-        Self::write_counted(writer, bytes_written, &mdat_size.to_be_bytes())?;
-        Self::write_counted(writer, bytes_written, b"mdat")?;
+        Self::write_counted(&mut self.writer, &mut self.bytes_written, &mdat_size.to_be_bytes())?;
+        Self::write_counted(&mut self.writer, &mut self.bytes_written, b"mdat")?;
 
-        #[derive(Clone, Copy)]
-        enum TrackKind {
-            Video,
-            Audio,
-        }
-
-        let mut schedule: Vec<(u64, TrackKind, usize)> = Vec::new();
-        for (idx, sample) in self.video_samples.iter().enumerate() {
-            schedule.push((sample.pts, TrackKind::Video, idx));
-        }
-        for (idx, sample) in self.audio_samples.iter().enumerate() {
-            schedule.push((sample.pts, TrackKind::Audio, idx));
-        }
-        schedule.sort_by_key(|(pts, kind, idx)| {
-            let kind_order = match kind {
-                TrackKind::Video => 0u8,
-                TrackKind::Audio => 1u8,
-            };
-            (*pts, kind_order, *idx)
-        });
-
+        // Write interleaved samples and collect chunk offsets
+        let schedule = self.compute_interleave_schedule();
         let mut video_chunk_offsets = Vec::with_capacity(self.video_samples.len());
         let mut audio_chunk_offsets = Vec::with_capacity(self.audio_samples.len());
-        let mut cursor = ftyp_len + 8;
+        let mut cursor = ftyp_len + 8;  // After ftyp + mdat header
 
         for (_, kind, idx) in schedule {
             match kind {
@@ -381,14 +410,14 @@ impl<Writer: Write> Mp4Writer<Writer> {
                     video_chunk_offsets.push(cursor);
                     let sample = &self.video_samples[idx];
                     let sample_len = sample.data.len() as u32;
-                    Self::write_counted(writer, bytes_written, &sample.data)?;
+                    Self::write_counted(&mut self.writer, &mut self.bytes_written, &sample.data)?;
                     cursor += sample_len;
                 }
                 TrackKind::Audio => {
                     audio_chunk_offsets.push(cursor);
                     let sample = &self.audio_samples[idx];
                     let sample_len = sample.data.len() as u32;
-                    Self::write_counted(writer, bytes_written, &sample.data)?;
+                    Self::write_counted(&mut self.writer, &mut self.bytes_written, &sample.data)?;
                     cursor += sample_len;
                 }
             }
@@ -412,10 +441,177 @@ impl<Writer: Write> Mp4Writer<Writer> {
             video,
             &video_tables,
             Some((audio_track, &audio_tables)),
-            &avc_config,
+            avc_config,
+            metadata,
         );
-        Self::write_counted(writer, bytes_written, &moov_box)
+        Self::write_counted(&mut self.writer, &mut self.bytes_written, &moov_box)
     }
+
+    fn finalize_fast_start(&mut self, video: &Mp4VideoTrack, metadata: Option<&Metadata>, avc_config: &AvcConfig) -> io::Result<()> {
+        let ftyp_box = build_ftyp_box();
+        let ftyp_len = ftyp_box.len() as u32;
+
+        // Calculate total mdat payload size
+        let mut mdat_payload_size: u32 = 0;
+        for sample in &self.video_samples {
+            mdat_payload_size += sample.data.len() as u32;
+        }
+        for sample in &self.audio_samples {
+            mdat_payload_size += sample.data.len() as u32;
+        }
+        let mdat_header_size = 8u32;
+        let mdat_total_size = mdat_header_size + mdat_payload_size;
+
+        let audio_present = self.audio_track.is_some();
+
+        // Build moov with placeholder offsets to measure its size
+        let (placeholder_video_tables, placeholder_audio_tables) = if audio_present {
+            // For fast-start with audio, we need to compute interleaved offsets
+            // First, compute the interleave schedule
+            let schedule = self.compute_interleave_schedule();
+            
+            // Placeholder offsets - will be recalculated after we know moov size
+            let mut video_offsets = Vec::with_capacity(self.video_samples.len());
+            let mut audio_offsets = Vec::with_capacity(self.audio_samples.len());
+            let mut cursor = 0u32;
+            for (_, kind, _) in &schedule {
+                match kind {
+                    TrackKind::Video => {
+                        video_offsets.push(cursor);
+                        cursor += 1; // placeholder
+                    }
+                    TrackKind::Audio => {
+                        audio_offsets.push(cursor);
+                        cursor += 1; // placeholder
+                    }
+                }
+            }
+            
+            let video_tables = SampleTables::from_samples(&self.video_samples, video_offsets, 1, self.video_last_delta);
+            let audio_tables = SampleTables::from_samples(&self.audio_samples, audio_offsets, 1, self.audio_last_delta);
+            (video_tables, Some(audio_tables))
+        } else {
+            // Video-only: all samples in one chunk
+            let chunk_offsets = if self.video_samples.is_empty() {
+                Vec::new()
+            } else {
+                vec![0u32]  // Single placeholder chunk offset (will be replaced with real value)
+            };
+            let samples_per_chunk = if self.video_samples.is_empty() { 0 } else { self.video_samples.len() as u32 };
+            let video_tables = SampleTables::from_samples(
+                &self.video_samples,
+                chunk_offsets,
+                samples_per_chunk,
+                self.video_last_delta,
+            );
+            (video_tables, None)
+        };
+
+        let placeholder_moov = if let Some(ref audio_tables) = placeholder_audio_tables {
+            let audio_track = self.audio_track.as_ref().unwrap();
+            build_moov_box(video, &placeholder_video_tables, Some((audio_track, audio_tables)), avc_config, metadata)
+        } else {
+            build_moov_box(video, &placeholder_video_tables, None, avc_config, metadata)
+        };
+        let moov_len = placeholder_moov.len() as u32;
+
+        // Now we know: mdat starts at ftyp_len + moov_len
+        let mdat_data_start = ftyp_len + moov_len + mdat_header_size;
+
+        // Rebuild moov with correct offsets
+        let (final_video_tables, final_audio_tables) = if audio_present {
+            let schedule = self.compute_interleave_schedule();
+            
+            let mut video_offsets = Vec::with_capacity(self.video_samples.len());
+            let mut audio_offsets = Vec::with_capacity(self.audio_samples.len());
+            let mut cursor = mdat_data_start;
+            
+            for (_, kind, idx) in &schedule {
+                match kind {
+                    TrackKind::Video => {
+                        video_offsets.push(cursor);
+                        cursor += self.video_samples[*idx].data.len() as u32;
+                    }
+                    TrackKind::Audio => {
+                        audio_offsets.push(cursor);
+                        cursor += self.audio_samples[*idx].data.len() as u32;
+                    }
+                }
+            }
+            
+            let video_tables = SampleTables::from_samples(&self.video_samples, video_offsets, 1, self.video_last_delta);
+            let audio_tables = SampleTables::from_samples(&self.audio_samples, audio_offsets, 1, self.audio_last_delta);
+            (video_tables, Some(audio_tables))
+        } else {
+            // Video only - all samples in one chunk
+            let chunk_offsets = if self.video_samples.is_empty() {
+                Vec::new()
+            } else {
+                vec![mdat_data_start]
+            };
+            let samples_per_chunk = if self.video_samples.is_empty() { 0 } else { self.video_samples.len() as u32 };
+            let video_tables = SampleTables::from_samples(&self.video_samples, chunk_offsets, samples_per_chunk, self.video_last_delta);
+            (video_tables, None)
+        };
+
+        let final_moov = if let Some(ref audio_tables) = final_audio_tables {
+            let audio_track = self.audio_track.as_ref().unwrap();
+            build_moov_box(video, &final_video_tables, Some((audio_track, audio_tables)), avc_config, metadata)
+        } else {
+            build_moov_box(video, &final_video_tables, None, avc_config, metadata)
+        };
+
+        // Write: ftyp → moov → mdat header → samples
+        Self::write_counted(&mut self.writer, &mut self.bytes_written, &ftyp_box)?;
+        Self::write_counted(&mut self.writer, &mut self.bytes_written, &final_moov)?;
+        Self::write_counted(&mut self.writer, &mut self.bytes_written, &mdat_total_size.to_be_bytes())?;
+        Self::write_counted(&mut self.writer, &mut self.bytes_written, b"mdat")?;
+
+        // Write samples in interleaved order
+        if audio_present {
+            let schedule = self.compute_interleave_schedule();
+            for (_, kind, idx) in schedule {
+                match kind {
+                    TrackKind::Video => {
+                        Self::write_counted(&mut self.writer, &mut self.bytes_written, &self.video_samples[idx].data)?;
+                    }
+                    TrackKind::Audio => {
+                        Self::write_counted(&mut self.writer, &mut self.bytes_written, &self.audio_samples[idx].data)?;
+                    }
+                }
+            }
+        } else {
+            for sample in &self.video_samples {
+                Self::write_counted(&mut self.writer, &mut self.bytes_written, &sample.data)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn compute_interleave_schedule(&self) -> Vec<(u64, TrackKind, usize)> {
+        let mut schedule: Vec<(u64, TrackKind, usize)> = Vec::new();
+        for (idx, sample) in self.video_samples.iter().enumerate() {
+            schedule.push((sample.pts, TrackKind::Video, idx));
+        }
+        for (idx, sample) in self.audio_samples.iter().enumerate() {
+            schedule.push((sample.pts, TrackKind::Audio, idx));
+        }
+        schedule.sort_by_key(|(pts, kind, idx)| {
+            let kind_order = match kind {
+                TrackKind::Video => 0u8,
+                TrackKind::Audio => 1u8,
+            };
+            (*pts, kind_order, *idx)
+        });
+        schedule
+    }
+}
+
+#[derive(Clone, Copy)]
+enum TrackKind {
+    Video,
+    Audio,
 }
 
 fn extract_avc_config_from_keyframe(data: &[u8]) -> Option<AvcConfig> {
@@ -551,6 +747,7 @@ fn build_moov_box(
     video_tables: &SampleTables,
     audio: Option<(&Mp4AudioTrack, &SampleTables)>,
     avc_config: &AvcConfig,
+    metadata: Option<&Metadata>,
 ) -> Vec<u8> {
     let mvhd_payload = build_mvhd_payload();
     let mvhd_box = build_box(b"mvhd", &mvhd_payload);
@@ -563,6 +760,15 @@ fn build_moov_box(
         let audio_trak = build_audio_trak_box(audio_track, audio_tables);
         payload.extend_from_slice(&audio_trak);
     }
+    
+    // Add metadata (udta box) if present
+    if let Some(meta) = metadata {
+        let udta_box = build_udta_box(meta);
+        if !udta_box.is_empty() {
+            payload.extend_from_slice(&udta_box);
+        }
+    }
+    
     build_box(b"moov", &payload)
 }
 
@@ -755,6 +961,11 @@ fn build_stbl_box(video: &Mp4VideoTrack, tables: &SampleTables, avc_config: &Avc
     let mut payload = Vec::new();
     payload.extend_from_slice(&stsd_box);
     payload.extend_from_slice(&stts_box);
+    // Add ctts box if B-frames are present (pts != dts for any sample)
+    if tables.has_bframes {
+        let ctts_box = build_ctts_box(&tables.cts_offsets);
+        payload.extend_from_slice(&ctts_box);
+    }
     payload.extend_from_slice(&stsc_box);
     payload.extend_from_slice(&stsz_box);
     payload.extend_from_slice(&stco_box);
@@ -843,6 +1054,32 @@ fn build_stss_box(keyframes: &[u32]) -> Vec<u8> {
         payload.extend_from_slice(&index.to_be_bytes());
     }
     build_box(b"stss", &payload)
+}
+
+/// Build ctts (Composition Time to Sample) box for B-frame support.
+/// Uses version 1 which supports signed offsets (required for some B-frame patterns).
+fn build_ctts_box(cts_offsets: &[i32]) -> Vec<u8> {
+    // Run-length encode the offsets
+    let mut entries: Vec<(u32, i32)> = Vec::new();
+    for &offset in cts_offsets {
+        if let Some(last) = entries.last_mut() {
+            if last.1 == offset {
+                last.0 += 1;
+                continue;
+            }
+        }
+        entries.push((1, offset));
+    }
+
+    let mut payload = Vec::new();
+    // Version 1 (supports signed offsets), flags 0
+    payload.extend_from_slice(&0x0100_0000_u32.to_be_bytes());
+    payload.extend_from_slice(&(entries.len() as u32).to_be_bytes());
+    for (count, offset) in entries {
+        payload.extend_from_slice(&count.to_be_bytes());
+        payload.extend_from_slice(&offset.to_be_bytes());
+    }
+    build_box(b"ctts", &payload)
 }
 
 fn build_avc1_box(video: &Mp4VideoTrack, avc_config: &AvcConfig) -> Vec<u8> {
@@ -1052,4 +1289,119 @@ fn build_box(typ: &[u8; 4], payload: &[u8]) -> Vec<u8> {
     buffer.extend_from_slice(typ);
     buffer.extend_from_slice(payload);
     buffer
+}
+
+// ============================================================================
+// Metadata (udta/meta/ilst) box building
+// ============================================================================
+
+fn build_udta_box(metadata: &Metadata) -> Vec<u8> {
+    let mut ilst_payload = Vec::new();
+    
+    if let Some(title) = &metadata.title {
+        ilst_payload.extend_from_slice(&build_ilst_string_item(b"\xa9nam", title));
+    }
+    
+    if let Some(creation_time) = metadata.creation_time {
+        // Format as ISO 8601: "YYYY-MM-DDTHH:MM:SSZ"
+        let date_str = format_unix_timestamp(creation_time);
+        ilst_payload.extend_from_slice(&build_ilst_string_item(b"\xa9day", &date_str));
+    }
+    
+    if ilst_payload.is_empty() {
+        return Vec::new();  // No metadata, skip udta entirely
+    }
+    
+    let ilst_box = build_box(b"ilst", &ilst_payload);
+    
+    // meta box requires hdlr
+    let hdlr_box = build_meta_hdlr_box();
+    
+    // meta is a full box (version + flags)
+    let mut meta_payload = vec![0u8; 4];  // version=0, flags=0
+    meta_payload.extend_from_slice(&hdlr_box);
+    meta_payload.extend_from_slice(&ilst_box);
+    let meta_box = build_box(b"meta", &meta_payload);
+    
+    build_box(b"udta", &meta_box)
+}
+
+fn build_ilst_string_item(atom_type: &[u8; 4], value: &str) -> Vec<u8> {
+    // data box: type indicator (1 = UTF-8) + locale (0) + string
+    let mut data_payload = Vec::new();
+    data_payload.extend_from_slice(&[0, 0, 0, 1]);  // type = UTF-8
+    data_payload.extend_from_slice(&[0, 0, 0, 0]);  // locale = 0
+    data_payload.extend_from_slice(value.as_bytes());
+    
+    let data_box = build_box(b"data", &data_payload);
+    build_box(atom_type, &data_box)
+}
+
+fn build_meta_hdlr_box() -> Vec<u8> {
+    let mut payload = vec![0u8; 4];  // version + flags
+    payload.extend_from_slice(&[0, 0, 0, 0]);  // pre_defined
+    payload.extend_from_slice(b"mdir");  // handler_type (metadata directory)
+    payload.extend_from_slice(b"appl");  // manufacturer
+    payload.extend_from_slice(&[0, 0, 0, 0]);  // reserved
+    payload.extend_from_slice(&[0, 0, 0, 0]);  // reserved
+    payload.push(0);  // name (empty, null-terminated)
+    build_box(b"hdlr", &payload)
+}
+
+fn format_unix_timestamp(unix_secs: u64) -> String {
+    // Simple conversion - days since epoch calculation
+    // This is approximate but good enough for metadata
+    const SECS_PER_MIN: u64 = 60;
+    const SECS_PER_HOUR: u64 = 3600;
+    const SECS_PER_DAY: u64 = 86400;
+    
+    let days_since_epoch = unix_secs / SECS_PER_DAY;
+    let remaining_secs = unix_secs % SECS_PER_DAY;
+    
+    let hours = remaining_secs / SECS_PER_HOUR;
+    let minutes = (remaining_secs % SECS_PER_HOUR) / SECS_PER_MIN;
+    let seconds = remaining_secs % SECS_PER_MIN;
+    
+    // Calculate year, month, day from days since 1970-01-01
+    // Using a simplified algorithm
+    let (year, month, day) = days_to_ymd(days_since_epoch);
+    
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", year, month, day, hours, minutes, seconds)
+}
+
+fn days_to_ymd(days: u64) -> (u32, u32, u32) {
+    // Simplified algorithm - works for dates from 1970 to ~2100
+    let mut remaining_days = days as i64;
+    let mut year = 1970u32;
+    
+    loop {
+        let days_in_year = if is_leap_year(year) { 366 } else { 365 };
+        if remaining_days < days_in_year {
+            break;
+        }
+        remaining_days -= days_in_year;
+        year += 1;
+    }
+    
+    let days_in_months: [i64; 12] = if is_leap_year(year) {
+        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    } else {
+        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    };
+    
+    let mut month = 1u32;
+    for &days_in_month in &days_in_months {
+        if remaining_days < days_in_month {
+            break;
+        }
+        remaining_days -= days_in_month;
+        month += 1;
+    }
+    
+    let day = (remaining_days + 1) as u32;
+    (year, month, day)
+}
+
+fn is_leap_year(year: u32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
 }

@@ -88,9 +88,16 @@ The v0.1.0 implementation is single‑threaded and does not make any guarantees 
 6. **Annex B only:** H.264 bitstreams must be provided in Annex B format (NAL units prefaced by start codes).  MP4 native format (length‑prefixed NAL units) is not supported for input.
 7. **ADTS only:** AAC audio must be provided as ADTS frames.  Raw AAC or other container formats (e.g. MP4 audio atoms) are not supported.
 
-## Notes on B-frames
+## B-frame Support
 
-Muxide v0.1.0 assumes inputs are already in presentation order and does not perform frame reordering. Callers must not provide B-frames (i.e. streams where PTS != DTS). In v0.1.0, Muxide does not attempt to detect B-frames; providing them may produce incorrect output.
+Muxide supports B-frames via the `write_video_with_dts()` method:
+
+- When B-frames are present, callers must provide both PTS (presentation timestamp) and DTS (decode timestamp)
+- DTS must be monotonically increasing (decode order)
+- PTS may differ from DTS (display order ≠ decode order)
+- The `ctts` (composition time offset) box is automatically generated
+
+For streams without B-frames, use `write_video()` which assumes PTS == DTS.
 
 ## Examples (Pseudo‑Code)
 

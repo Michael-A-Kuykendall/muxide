@@ -67,14 +67,15 @@ fn audio_samples_writes_second_track_and_tables() -> Result<(), Box<dyn std::err
     let produced = buffer.lock().unwrap();
     let top = parse_boxes(&produced);
     assert_eq!(top[0].typ, *b"ftyp");
-    assert_eq!(top[1].typ, *b"mdat");
-    assert_eq!(top[2].typ, *b"moov");
+    // fast_start=true (default) puts moov before mdat
+    assert_eq!(top[1].typ, *b"moov");
+    assert_eq!(top[2].typ, *b"mdat");
 
-    let mdat = top[1];
+    let mdat = top[2];
     let mdat_payload_start = (mdat.offset + 8) as u32;
     let mdat_end = (mdat.offset + mdat.size) as u32;
 
-    let moov_payload = top[2].payload(&produced);
+    let moov_payload = top[1].payload(&produced);
     let traks: Vec<Mp4Box> = parse_boxes(moov_payload)
         .into_iter()
         .filter(|b| b.typ == *b"trak")

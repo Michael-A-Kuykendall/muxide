@@ -1,11 +1,30 @@
-//! Muxide library crate entry point.
+//! # Muxide
 //!
-//! Muxide is a recording-oriented MP4 muxer.
+//! **Zero-dependency pure-Rust MP4 muxer for recording applications.**
 //!
-//! - Input: encoded H.264 Annex B frames (`0x00000001` start codes) and optional AAC-in-ADTS.
-//! - Output: an MP4 (ISOBMFF) file with a keyframe index (`stss`).
+//! ## Core Invariant
 //!
-//! See `docs/charter.md` and `docs/contract.md` for invariants.
+//! > Muxide guarantees that any **correctly-timestamped**, **already-encoded** audio/video
+//! > stream can be turned into a **standards-compliant**, **immediately-playable** MP4
+//! > **without external tooling**.
+//!
+//! ## What Muxide Does
+//!
+//! - Accepts encoded H.264 (Annex B) video frames with timestamps
+//! - Accepts encoded AAC (ADTS) audio frames with timestamps  
+//! - Outputs MP4 files with fast-start (moov before mdat) for instant web playback
+//! - Supports B-frames via explicit PTS/DTS
+//! - Supports fragmented MP4 (fMP4) for DASH/HLS streaming
+//!
+//! ## What Muxide Does NOT Do
+//!
+//! - ❌ Encode or decode video/audio (use openh264, x264, etc.)
+//! - ❌ Read or demux MP4 files
+//! - ❌ Fix bad timestamps (rejects invalid input)
+//! - ❌ DRM, encryption, or content protection
+//! - ❌ MKV, WebM, or other container formats
+//!
+//! See `docs/charter.md` and `docs/contract.md` for full invariants.
 //!
 //! # Example
 //!
@@ -30,3 +49,6 @@ mod muxer;
 
 // Re-export the API module so users can simply `use muxide::api::...`.
 pub mod api;
+
+// Fragmented MP4 support for streaming applications
+pub mod fragmented;

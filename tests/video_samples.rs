@@ -51,15 +51,16 @@ fn video_samples_writes_mdat_and_tables() -> Result<(), Box<dyn std::error::Erro
     let produced = buffer.lock().unwrap();
     let top = parse_boxes(&produced);
     assert_eq!(top[0].typ, *b"ftyp");
-    assert_eq!(top[1].typ, *b"mdat");
-    assert_eq!(top[2].typ, *b"moov");
+    // Fast-start is enabled by default: moov comes before mdat
+    assert_eq!(top[1].typ, *b"moov");
+    assert_eq!(top[2].typ, *b"mdat");
 
     let ftyp = top[0];
-    let mdat = top[1];
+    let moov = top[1];
+    let mdat = top[2];
 
-    // stco should point to the first byte of mdat payload.
-    let expected_chunk_offset = (ftyp.size + 8) as u32;
-    assert_eq!(mdat.offset, ftyp.size);
+    // stco should point to the first byte of mdat payload (after moov).
+    let expected_chunk_offset = (ftyp.size + moov.size + 8) as u32;
 
     // Verify mdat begins with a 4-byte NAL length (AVCC format).
     let mdat_payload = mdat.payload(&produced);
@@ -69,7 +70,7 @@ fn video_samples_writes_mdat_and_tables() -> Result<(), Box<dyn std::error::Erro
     assert!(mdat_payload.len() >= 4 + first_nal_len);
 
     // Navigate to stbl.
-    let moov_payload = top[2].payload(&produced);
+    let moov_payload = moov.payload(&produced);
     let trak = find_box(moov_payload, *b"trak");
     let trak_payload = trak.payload(moov_payload);
     let mdia = find_box(trak_payload, *b"mdia");

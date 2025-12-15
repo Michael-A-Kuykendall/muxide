@@ -34,6 +34,42 @@ pub struct MuxerConfig {
     pub height: u32,
     pub framerate: f64,
     pub audio: Option<AudioTrackConfig>,
+    pub metadata: Option<Metadata>,
+    pub fast_start: bool,
+}
+
+/// Metadata to embed in the MP4 file (title, creation time, etc.)
+#[derive(Debug, Clone, Default)]
+pub struct Metadata {
+    /// Title of the recording (appears in media players)
+    pub title: Option<String>,
+    /// Creation timestamp in seconds since Unix epoch (1970-01-01)
+    pub creation_time: Option<u64>,
+}
+
+impl Metadata {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    pub fn with_creation_time(mut self, unix_timestamp: u64) -> Self {
+        self.creation_time = Some(unix_timestamp);
+        self
+    }
+
+    /// Set creation time to current system time
+    pub fn with_current_time(mut self) -> Self {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        if let Ok(duration) = SystemTime::now().duration_since(UNIX_EPOCH) {
+            self.creation_time = Some(duration.as_secs());
+        }
+        self
+    }
 }
 
 impl MuxerConfig {
@@ -43,6 +79,8 @@ impl MuxerConfig {
             height,
             framerate,
             audio: None,
+            metadata: None,
+            fast_start: true,  // Default ON for web compatibility
         }
     }
 
@@ -58,12 +96,23 @@ impl MuxerConfig {
         }
         self
     }
+
+    pub fn with_metadata(mut self, metadata: Metadata) -> Self {
+        self.metadata = Some(metadata);
+        self
+    }
+
+    pub fn with_fast_start(mut self, enabled: bool) -> Self {
+        self.fast_start = enabled;
+        self
+    }
 }
 
 /// Summary statistics returned when finishing a mux.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MuxerStats {
     pub video_frames: u64,
+    pub audio_frames: u64,
     pub duration_secs: f64,
     pub bytes_written: u64,
 }
@@ -82,6 +131,10 @@ pub struct MuxerBuilder<Writer> {
     video: Option<(VideoCodec, u32, u32, f64)>,
     /// Optional audio configuration.
     audio: Option<(AudioCodec, u32, u16)>,
+    /// Metadata to embed in the output file.
+    metadata: Option<Metadata>,
+    /// Whether to enable fast-start (moov before mdat).
+    fast_start: bool,
 }
 
 impl<Writer> MuxerBuilder<Writer> {
@@ -91,6 +144,8 @@ impl<Writer> MuxerBuilder<Writer> {
             writer,
             video: None,
             audio: None,
+            metadata: None,
+            fast_start: true,  // Default ON for web compatibility
         }
     }
 
@@ -103,6 +158,19 @@ impl<Writer> MuxerBuilder<Writer> {
     /// Configure the audio track.
     pub fn audio(mut self, codec: AudioCodec, sample_rate: u32, channels: u16) -> Self {
         self.audio = Some((codec, sample_rate, channels));
+        self
+    }
+
+    /// Set metadata to embed in the output file (title, creation time, etc.)
+    pub fn with_metadata(mut self, metadata: Metadata) -> Self {
+        self.metadata = Some(metadata);
+        self
+    }
+
+    /// Enable or disable fast-start mode (moov before mdat).
+    /// Default is `true` for web streaming compatibility.
+    pub fn with_fast_start(mut self, enabled: bool) -> Self {
+        self.fast_start = enabled;
         self
     }
 
@@ -150,6 +218,8 @@ impl<Writer> MuxerBuilder<Writer> {
             writer,
             video_track,
             audio_track,
+            metadata: self.metadata,
+            fast_start: self.fast_start,
             first_video_pts: None,
             last_audio_pts: None,
             finished: false,
@@ -188,6 +258,8 @@ pub struct Muxer<Writer> {
     writer: Mp4Writer<Writer>,
     video_track: VideoTrackConfig,
     audio_track: Option<AudioTrackConfig>,
+    metadata: Option<Metadata>,
+    fast_start: bool,
     first_video_pts: Option<u64>,
     last_audio_pts: Option<u64>,
     finished: bool,
@@ -295,7 +367,10 @@ impl<Writer: Write> Muxer<Writer> {
         if let Some(audio) = config.audio {
             builder = builder.audio(audio.codec, audio.sample_rate, audio.channels);
         }
-        builder.build()
+        let mut muxer = builder.build()?;
+        muxer.metadata = config.metadata;
+        muxer.fast_start = config.fast_start;
+        Ok(muxer)
     }
 
     /// Write a video frame to the container.
@@ -322,6 +397,44 @@ impl<Writer: Write> Muxer<Writer> {
         }
         self.writer
             .write_video_sample(pts_units, data, is_keyframe)
+            .map_err(MuxerError::from)
+    }
+
+    /// Write a video frame with explicit decode timestamp for B-frame support.
+    ///
+    /// - `pts` is the presentation timestamp in seconds (display order)
+    /// - `dts` is the decode timestamp in seconds (decode order)
+    /// 
+    /// For B-frames, PTS > DTS because the frame is displayed later than it's decoded.
+    /// DTS must be monotonically increasing.
+    ///
+    /// Example GOP: I B B P with DTS 0,1,2,3 and PTS 0,2,3,1
+    pub fn write_video_with_dts(
+        &mut self,
+        pts: f64,
+        dts: f64,
+        data: &[u8],
+        is_keyframe: bool,
+    ) -> Result<(), MuxerError> {
+        if self.finished {
+            return Err(MuxerError::AlreadyFinished);
+        }
+        if pts < 0.0 {
+            return Err(MuxerError::NegativeVideoPts);
+        }
+        if dts < 0.0 {
+            return Err(MuxerError::NegativeVideoPts);
+        }
+        let scaled_pts = (pts * MEDIA_TIMESCALE as f64).round();
+        let pts_units = scaled_pts as u64;
+        let scaled_dts = (dts * MEDIA_TIMESCALE as f64).round();
+        let dts_units = scaled_dts as u64;
+        
+        if self.first_video_pts.is_none() {
+            self.first_video_pts = Some(pts_units);
+        }
+        self.writer
+            .write_video_sample_with_dts(pts_units, dts_units, data, is_keyframe)
             .map_err(MuxerError::from)
     }
 
@@ -384,16 +497,18 @@ impl<Writer: Write> Muxer<Writer> {
             width: self.video_track.width,
             height: self.video_track.height,
         };
-        self.writer.finalize(&params)?;
+        self.writer.finalize(&params, self.metadata.as_ref(), self.fast_start)?;
         self.finished = true;
 
         let video_frames = self.writer.video_sample_count();
+        let audio_frames = self.writer.audio_sample_count();
         let duration_ticks = self.writer.max_end_pts().unwrap_or(0);
         let duration_secs = duration_ticks as f64 / MEDIA_TIMESCALE as f64;
         let bytes_written = self.writer.bytes_written();
 
         Ok(MuxerStats {
             video_frames,
+            audio_frames,
             duration_secs,
             bytes_written,
         })

@@ -1,26 +1,77 @@
 # Muxide
 
-**Muxide** is a recording‑oriented multimedia container writer for Rust.  Its goal is to provide a simple, ergonomic API for muxing encoded video and audio frames into an MP4 container with real‑world playback guarantees.
+**Zero-dependency pure-Rust MP4 muxer for recording applications.**
 
-This crate is built following the principles of the *Slice‑Gated Engineering Doctrine*, where work is broken into small, verifiable slices with clear acceptance gates.  See the `docs/charter.md` and `docs/contract.md` for the high‑level goals and API contract of the project.
+[![Crates.io](https://img.shields.io/crates/v/muxide.svg)](https://crates.io/crates/muxide)
+[![Documentation](https://docs.rs/muxide/badge.svg)](https://docs.rs/muxide)
+[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
 
-> *This README only explains what the project aims to be.  Implementation details and API stability are driven by the charter and contract documents.*
+> **Muxide guarantees that any correctly-timestamped, already-encoded audio/video stream can be turned into a standards-compliant, immediately-playable MP4 without external tooling.**
 
-## Quick start
+## Features
+
+- ✅ **H.264/AVC** video (Annex B format)
+- ✅ **AAC** audio (ADTS format)
+- ✅ **Fast-start** (moov before mdat) for instant web playback
+- ✅ **B-frame support** via explicit PTS/DTS
+- ✅ **Fragmented MP4** for DASH/HLS streaming
+- ✅ **Metadata** (title, creation time)
+- ✅ **Zero dependencies** (only std)
+- ✅ **MIT licensed** (no GPL)
+
+## Quick Start
 
 ```rust
-use muxide::api::{Muxer, MuxerConfig};
+use muxide::api::{MuxerBuilder, VideoCodec, AudioCodec, Metadata};
 use std::fs::File;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-	let out = File::create("out.mp4")?;
-	let config = MuxerConfig::new(1920, 1080, 30.0);
-	let mut muxer = Muxer::new(out, config)?;
+    let file = File::create("recording.mp4")?;
+    
+    let mut muxer = MuxerBuilder::new(file)
+        .video(VideoCodec::H264, 1920, 1080, 30.0)
+        .audio(AudioCodec::Aac, 48000, 2)
+        .with_metadata(Metadata::new().with_title("My Recording"))
+        .with_fast_start(true)
+        .build()?;
 
-	// muxer.write_video(pts_secs, annex_b_bytes, is_keyframe)?;
+    // Write encoded frames (from your encoder)
+    // muxer.write_video(pts_seconds, h264_annex_b_bytes, is_keyframe)?;
+    // muxer.write_audio(pts_seconds, aac_adts_bytes)?;
 
-	let stats = muxer.finish_with_stats()?;
-	println!("wrote {} bytes", stats.bytes_written);
-	Ok(())
+    let stats = muxer.finish_with_stats()?;
+    println!("Wrote {} frames, {} bytes", stats.video_frames, stats.bytes_written);
+    Ok(())
 }
 ```
+
+## What Muxide Is
+
+| ✅ Muxide Does | ❌ Muxide Does NOT |
+|----------------|--------------------|
+| Accept encoded frames + timestamps | Encode or decode video/audio |
+| Output playable MP4 files | Read or parse MP4 files |
+| Fast-start for web streaming | Fix broken timestamps |
+| Fragmented MP4 for live streaming | DRM or encryption |
+| Strict input validation | MKV, WebM, or other formats |
+
+## Why Muxide?
+
+| Feature | muxide | `mp4` crate | `mp4e` | FFmpeg |
+|---------|--------|-------------|--------|--------|
+| Pure Rust | ✅ | ✅ | ✅ | ❌ |
+| Zero deps | ✅ | ❌ (6 deps) | ✅ | ❌ |
+| Fast-start | ✅ | ❌ | ❌ | ✅ |
+| MIT license | ✅ | ✅ | ✅ | ❌ (GPL) |
+| Maintained | ✅ | ❌ (2yr stale) | 🟡 | ✅ |
+| Builder API | ✅ | ❌ | ❌ | N/A |
+
+## Documentation
+
+- [API Reference (docs.rs)](https://docs.rs/muxide)
+- [Design Charter](docs/charter.md)
+- [API Contract](docs/contract.md)
+
+## License
+
+Dual licensed under MIT OR Apache-2.0.
