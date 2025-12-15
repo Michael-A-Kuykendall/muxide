@@ -56,13 +56,13 @@ fn video_track_structure_contains_expected_boxes() -> Result<(), Box<dyn std::er
     let size_start = avc_c_index - 4;
     let avc_c_size =
         u32::from_be_bytes(avc1_payload[size_start..size_start + 4].try_into().unwrap()) as usize;
-    let avcC_payload = &avc1_payload[size_start + 8..size_start + avc_c_size];
+    let avc_c_payload = &avc1_payload[size_start + 8..size_start + avc_c_size];
     assert!(
-        avcC_payload.windows(1).any(|w| w[0] == 0x67),
+        avc_c_payload.windows(1).any(|w| w[0] == 0x67),
         "SPS missing in avcC"
     );
     assert!(
-        avcC_payload.windows(1).any(|w| w[0] == 0x68),
+        avc_c_payload.windows(1).any(|w| w[0] == 0x68),
         "PPS missing in avcC"
     );
 

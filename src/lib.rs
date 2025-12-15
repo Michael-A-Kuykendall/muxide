@@ -1,11 +1,30 @@
 //! Muxide library crate entry point.
 //!
-//! This crate exposes a high-level API for muxing encoded audio and video
-//! streams into container formats.  The focus of the initial version is on
-//! writing MP4 files with H.264 video and optional AAC audio, with a strong
-//! emphasis on correctness and compatibility.  See the `docs/charter.md`
-//! and `docs/contract.md` for detailed information about the goals,
-//! non-goals and API invariants.
+//! Muxide is a recording-oriented MP4 muxer.
+//!
+//! - Input: encoded H.264 Annex B frames (`0x00000001` start codes) and optional AAC-in-ADTS.
+//! - Output: an MP4 (ISOBMFF) file with a keyframe index (`stss`).
+//!
+//! See `docs/charter.md` and `docs/contract.md` for invariants.
+//!
+//! # Example
+//!
+//! ```no_run
+//! use muxide::api::{Muxer, MuxerConfig};
+//! use std::fs::File;
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let file = File::create("out.mp4")?;
+//! let config = MuxerConfig::new(1920, 1080, 30.0);
+//! let mut muxer = Muxer::new(file, config)?;
+//!
+//! // Write frames (encoded elsewhere).
+//! // muxer.write_video(pts_secs, annex_b_bytes, is_keyframe)?;
+//!
+//! let _stats = muxer.finish_with_stats()?;
+//! # Ok(())
+//! # }
+//! ```
 
 mod muxer;
 

@@ -1,9 +1,12 @@
-## Muxide library crate
-## This file defines the package metadata and dependencies for the Muxide crate.
-
 [package]
 name = "muxide"
 version = "0.1.0"
 edition = "2021"
+description = "Recording-oriented MP4 muxer for H.264 (optional AAC)"
+readme = "README.md"
+repository = "https://github.com/Michael-A-Kuykendall/muxide"
+license = "MIT OR Apache-2.0"
+keywords = ["mp4", "isobmff", "h264", "mux", "recording"]
+categories = ["multimedia", "encoding"]
 
 [dependencies]

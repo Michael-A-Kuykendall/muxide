@@ -50,7 +50,6 @@ struct SampleInfo {
 }
 
 struct SampleTables {
-    sample_count: u32,
     durations: Vec<u32>,
     sizes: Vec<u32>,
     keyframes: Vec<u32>,
@@ -92,8 +91,8 @@ impl SampleTables {
                 }
             })
             .collect();
+        let _ = sample_count;
         Self {
-            sample_count,
             durations,
             sizes,
             keyframes,
@@ -162,10 +161,6 @@ impl<Writer: Write> Mp4Writer<Writer> {
 
     pub(crate) fn video_sample_count(&self) -> u64 {
         self.video_samples.len() as u64
-    }
-
-    pub(crate) fn audio_sample_count(&self) -> u64 {
-        self.audio_samples.len() as u64
     }
 
     pub(crate) fn bytes_written(&self) -> u64 {
@@ -475,7 +470,7 @@ fn annexb_to_avcc(data: &[u8]) -> Vec<u8> {
     out
 }
 
-fn annexb_iter_nals(mut data: &[u8]) -> AnnexBNalIter<'_> {
+fn annexb_iter_nals(data: &[u8]) -> AnnexBNalIter<'_> {
     AnnexBNalIter { data, cursor: 0 }
 }
 
