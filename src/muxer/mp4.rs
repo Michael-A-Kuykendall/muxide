@@ -22,6 +22,7 @@ pub struct Mp4Writer<Writer> {
     audio_prev_pts: Option<u64>,
     audio_last_delta: Option<u32>,
     finalized: bool,
+    bytes_written: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -155,7 +156,42 @@ impl<Writer: Write> Mp4Writer<Writer> {
             audio_prev_pts: None,
             audio_last_delta: None,
             finalized: false,
+            bytes_written: 0,
         }
+    }
+
+    pub(crate) fn video_sample_count(&self) -> u64 {
+        self.video_samples.len() as u64
+    }
+
+    pub(crate) fn audio_sample_count(&self) -> u64 {
+        self.audio_samples.len() as u64
+    }
+
+    pub(crate) fn bytes_written(&self) -> u64 {
+        self.bytes_written
+    }
+
+    pub(crate) fn max_end_pts(&self) -> Option<u64> {
+        fn track_end(samples: &[SampleInfo], last_delta: Option<u32>) -> Option<u64> {
+            let last = samples.last()?;
+            Some(last.pts + u64::from(last_delta.unwrap_or(0)))
+        }
+
+        let video_end = track_end(&self.video_samples, self.video_last_delta);
+        let audio_end = track_end(&self.audio_samples, self.audio_last_delta);
+
+        match (video_end, audio_end) {
+            (Some(v), Some(a)) => Some(v.max(a)),
+            (Some(v), None) => Some(v),
+            (None, Some(a)) => Some(a),
+            (None, None) => None,
+        }
+    }
+
+    fn write_counted(writer: &mut Writer, bytes_written: &mut u64, buf: &[u8]) -> io::Result<()> {
+        *bytes_written = bytes_written.saturating_add(buf.len() as u64);
+        writer.write_all(buf)
     }
 
     pub fn enable_audio(&mut self, track: Mp4AudioTrack) {
@@ -258,9 +294,13 @@ impl<Writer: Write> Mp4Writer<Writer> {
             ));
         }
         self.finalized = true;
+
+        let writer = &mut self.writer;
+        let bytes_written = &mut self.bytes_written;
+
         let ftyp_box = build_ftyp_box();
         let ftyp_len = ftyp_box.len() as u32;
-        self.writer.write_all(&ftyp_box)?;
+        Self::write_counted(writer, bytes_written, &ftyp_box)?;
 
         let audio_present = self.audio_track.is_some();
 
@@ -278,10 +318,10 @@ impl<Writer: Write> Mp4Writer<Writer> {
                 }
 
                 let mdat_size = 8 + payload_size;
-                self.writer.write_all(&mdat_size.to_be_bytes())?;
-                self.writer.write_all(b"mdat")?;
+                Self::write_counted(writer, bytes_written, &mdat_size.to_be_bytes())?;
+                Self::write_counted(writer, bytes_written, b"mdat")?;
                 for sample in &self.video_samples {
-                    self.writer.write_all(&sample.data)?;
+                    Self::write_counted(writer, bytes_written, &sample.data)?;
                 }
                 Some(ftyp_len + 8)
             } else {
@@ -300,7 +340,7 @@ impl<Writer: Write> Mp4Writer<Writer> {
                 self.video_last_delta,
             );
             let moov_box = build_moov_box(video, &tables, None, &avc_config);
-            return self.writer.write_all(&moov_box);
+            return Self::write_counted(writer, bytes_written, &moov_box);
         }
 
         let mut total_payload_size: u32 = 0;
@@ -312,8 +352,8 @@ impl<Writer: Write> Mp4Writer<Writer> {
         }
 
         let mdat_size = 8 + total_payload_size;
-        self.writer.write_all(&mdat_size.to_be_bytes())?;
-        self.writer.write_all(b"mdat")?;
+        Self::write_counted(writer, bytes_written, &mdat_size.to_be_bytes())?;
+        Self::write_counted(writer, bytes_written, b"mdat")?;
 
         #[derive(Clone, Copy)]
         enum TrackKind {
@@ -345,14 +385,16 @@ impl<Writer: Write> Mp4Writer<Writer> {
                 TrackKind::Video => {
                     video_chunk_offsets.push(cursor);
                     let sample = &self.video_samples[idx];
-                    self.writer.write_all(&sample.data)?;
-                    cursor += sample.data.len() as u32;
+                    let sample_len = sample.data.len() as u32;
+                    Self::write_counted(writer, bytes_written, &sample.data)?;
+                    cursor += sample_len;
                 }
                 TrackKind::Audio => {
                     audio_chunk_offsets.push(cursor);
                     let sample = &self.audio_samples[idx];
-                    self.writer.write_all(&sample.data)?;
-                    cursor += sample.data.len() as u32;
+                    let sample_len = sample.data.len() as u32;
+                    Self::write_counted(writer, bytes_written, &sample.data)?;
+                    cursor += sample_len;
                 }
             }
         }
@@ -377,7 +419,7 @@ impl<Writer: Write> Mp4Writer<Writer> {
             Some((audio_track, &audio_tables)),
             &avc_config,
         );
-        self.writer.write_all(&moov_box)
+        Self::write_counted(writer, bytes_written, &moov_box)
     }
 }
 

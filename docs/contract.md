@@ -19,6 +19,10 @@ Muxide exposes a builder pattern for creating a `Muxer` instance that writes an 
 
 * `Muxer<Writer>` — Type parameterised by an output writer.  Provides methods to write video and audio frames and to finalise the file.  The generic parameter is preserved to allow any type implementing `Write` as the underlying sink.
 
+* `MuxerConfig` — Simple configuration struct for integrations that prefer a config-driven constructor.
+
+* `MuxerStats` — Statistics returned when finishing a mux.
+
 * `MuxerError` — Enumeration of error conditions that may be returned by builder or runtime operations.  This enum may grow as the implementation matures.
 
 ### Timebase
@@ -42,6 +46,8 @@ Muxide converts incoming timestamps in seconds (`pts: f64`) into a fixed interna
 
 ### Muxer Methods
 
+* `new(writer: Writer, config: MuxerConfig) -> Result<Muxer<Writer>, MuxerError>` — Convenience constructor that builds a muxer from a `MuxerConfig`.
+
 * `write_video(&mut self, pts: f64, data: &[u8], is_keyframe: bool) -> Result<(), MuxerError>` — Writes a video frame to the container.
 
   **Invariants:**
@@ -58,7 +64,11 @@ Muxide converts incoming timestamps in seconds (`pts: f64`) into a fixed interna
 
 * `finish(self) -> Result<(), MuxerError>` — Finalises the container.  After calling this method, no further `write_*` calls may be made.  This method writes any pending metadata (e.g. `moov` box) to the output writer.
 
+* `finish_with_stats(self) -> Result<MuxerStats, MuxerError>` — Finalises the container and returns muxing statistics.
+
 * `finish_in_place(&mut self) -> Result<(), MuxerError>` — Finalises the container without consuming the muxer.  This is a convenience for applications that want an explicit “finalised” error on double-finish and on writes after finishing.
+
+* `finish_in_place_with_stats(&mut self) -> Result<MuxerStats, MuxerError>` — In-place finalisation that returns muxing statistics.
 
 ### Error Semantics
 

@@ -27,6 +27,47 @@ pub enum AudioCodec {
     None,
 }
 
+/// High-level muxer configuration intended for simple integrations (e.g. CrabCamera).
+#[derive(Debug, Clone)]
+pub struct MuxerConfig {
+    pub width: u32,
+    pub height: u32,
+    pub framerate: f64,
+    pub audio: Option<AudioTrackConfig>,
+}
+
+impl MuxerConfig {
+    pub fn new(width: u32, height: u32, framerate: f64) -> Self {
+        Self {
+            width,
+            height,
+            framerate,
+            audio: None,
+        }
+    }
+
+    pub fn with_audio(mut self, codec: AudioCodec, sample_rate: u32, channels: u16) -> Self {
+        if codec == AudioCodec::None {
+            self.audio = None;
+        } else {
+            self.audio = Some(AudioTrackConfig {
+                codec,
+                sample_rate,
+                channels,
+            });
+        }
+        self
+    }
+}
+
+/// Summary statistics returned when finishing a mux.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MuxerStats {
+    pub video_frames: u64,
+    pub duration_secs: f64,
+    pub bytes_written: u64,
+}
+
 /// Builder for constructing a new muxer instance.
 ///
 /// The builder follows a fluent API pattern: each method returns a
@@ -243,6 +284,20 @@ impl std::error::Error for MuxerError {}
 // returning errors.  These stubs ensure that the API compiles and can be
 // used by downstream code while implementation proceeds in later slices.
 impl<Writer: Write> Muxer<Writer> {
+    /// Convenience constructor for config-driven integrations.
+    pub fn new(writer: Writer, config: MuxerConfig) -> Result<Self, MuxerError> {
+        let mut builder = MuxerBuilder::new(writer).video(
+            VideoCodec::H264,
+            config.width,
+            config.height,
+            config.framerate,
+        );
+        if let Some(audio) = config.audio {
+            builder = builder.audio(audio.codec, audio.sample_rate, audio.channels);
+        }
+        builder.build()
+    }
+
     /// Write a video frame to the container.
     ///
     /// `pts` is the presentation timestamp in seconds.  In v0, frames must
@@ -317,6 +372,11 @@ impl<Writer: Write> Muxer<Writer> {
     /// In the current slice this writes the `ftyp`/`moov` boxes, resulting
     /// in a minimal MP4 header that can be inspected by the slice 02 tests.
     pub fn finish_in_place(&mut self) -> Result<(), MuxerError> {
+        self.finish_in_place_with_stats().map(|_| ())
+    }
+
+    /// Finalise the container and return muxing statistics.
+    pub fn finish_in_place_with_stats(&mut self) -> Result<MuxerStats, MuxerError> {
         if self.finished {
             return Err(MuxerError::AlreadyFinished);
         }
@@ -326,10 +386,25 @@ impl<Writer: Write> Muxer<Writer> {
         };
         self.writer.finalize(&params)?;
         self.finished = true;
-        Ok(())
+
+        let video_frames = self.writer.video_sample_count();
+        let duration_ticks = self.writer.max_end_pts().unwrap_or(0);
+        let duration_secs = duration_ticks as f64 / MEDIA_TIMESCALE as f64;
+        let bytes_written = self.writer.bytes_written();
+
+        Ok(MuxerStats {
+            video_frames,
+            duration_secs,
+            bytes_written,
+        })
     }
 
     pub fn finish(mut self) -> Result<(), MuxerError> {
         self.finish_in_place()
+    }
+
+    /// Finalise the container and return muxing statistics.
+    pub fn finish_with_stats(mut self) -> Result<MuxerStats, MuxerError> {
+        self.finish_in_place_with_stats()
     }
 }
