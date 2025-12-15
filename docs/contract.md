@@ -19,7 +19,7 @@ Muxide exposes a builder pattern for creating a `Muxer` instance that writes an 
 
 * `Muxer<Writer>` — Type parameterised by an output writer.  Provides methods to write video and audio frames and to finalise the file.  The generic parameter is preserved to allow any type implementing `Write` as the underlying sink.
 
-* `MuxerError` — Enumeration of error conditions that may be returned by builder or runtime operations.  This enum will grow as the implementation matures; clients should treat unknown variants exhaustively.
+* `MuxerError` — Enumeration of error conditions that may be returned by builder or runtime operations.  This enum may grow as the implementation matures.
 
 ### Timebase
 
@@ -38,15 +38,15 @@ Muxide converts incoming timestamps in seconds (`pts: f64`) into a fixed interna
 
 * `build(self) -> Result<Muxer<Writer>, MuxerError>` — Validates the configuration and returns a `Muxer` instance on success.  In v0.1.0 the following validation rules apply:
   1. A video track must have been configured.  Otherwise a `MuxerError::MissingVideoConfig` is returned.
-  2. If an audio track is configured, it must have a positive sample rate and channel count.  Invalid values result in a `MuxerError::Other` with a descriptive message.
+  2. If `AudioCodec::None` is selected, the muxer behaves as video-only.
 
 ### Muxer Methods
 
 * `write_video(&mut self, pts: f64, data: &[u8], is_keyframe: bool) -> Result<(), MuxerError>` — Writes a video frame to the container.
 
   **Invariants:**
-  - `pts` **must be non‑negative and strictly greater than the `pts` of the previous video frame**.  Frames with non‑monotonic timestamps cause `MuxerError::Other` with a descriptive message.
-  - `data` must contain a complete encoded frame in Annex B format.  The first video frame of a file must be a keyframe and must contain SPS and PPS NAL units; otherwise a `MuxerError::Other` is returned.
+  - `pts` **must be non‑negative and strictly greater than the `pts` of the previous video frame**.  Violations produce `MuxerError::NegativeVideoPts` or `MuxerError::NonIncreasingVideoPts`.
+  - `data` must contain a complete encoded frame in Annex B format.  The first video frame of a file must be a keyframe and must contain SPS and PPS NAL units; otherwise `MuxerError::FirstVideoFrameMustBeKeyframe` or `MuxerError::FirstVideoFrameMissingSpsPps` is returned.
   - `is_keyframe` must accurately reflect whether the frame is a keyframe (IDR picture).  Incorrect keyframe flags may result in unseekable files.
 
 * `write_audio(&mut self, pts: f64, data: &[u8]) -> Result<(), MuxerError>` — Writes an audio frame to the container.
@@ -56,13 +56,13 @@ Muxide converts incoming timestamps in seconds (`pts: f64`) into a fixed interna
   - Audio must not arrive before the first video frame (i.e. audio `pts` must be >= video `pts`).
   - `data` must contain a complete encoded AAC frame (ADTS).  Empty frames cause an error.
 
-* `finish(self) -> Result<(), MuxerError>` — Finalises the container.  After calling this method, no further `write_*` calls may be made.  This method writes any pending metadata (e.g. `moov` box) to the output writer.  Errors returned at this stage indicate IO failures or internal state errors.  The writer is consumed by `finish`; if you need access to the inner writer, call `into_inner` instead (not available in v0.1.0).
+* `finish(self) -> Result<(), MuxerError>` — Finalises the container.  After calling this method, no further `write_*` calls may be made.  This method writes any pending metadata (e.g. `moov` box) to the output writer.
 
 * `finish_in_place(&mut self) -> Result<(), MuxerError>` — Finalises the container without consuming the muxer.  This is a convenience for applications that want an explicit “finalised” error on double-finish and on writes after finishing.
 
 ### Error Semantics
 
-All functions that can fail return a `MuxerError`.  Clients must handle each error case explicitly; ignoring an error or assuming that all errors are recoverable is incorrect.  New error variants may be added in minor versions.  The error enum is deliberately non‑exhaustive: clients should include a wildcard arm when matching on errors.
+All functions that can fail return a `MuxerError`. New error variants may be added in minor versions.
 
 ### Concurrency & Thread Safety
 
@@ -77,6 +77,10 @@ The v0.1.0 implementation is single‑threaded and does not make any guarantees 
 5. **No B‑frames:** The v0.1.0 implementation does not support frame reordering (no B‑frames).  Inputs containing B‑frames must be rejected.
 6. **Annex B only:** H.264 bitstreams must be provided in Annex B format (NAL units prefaced by start codes).  MP4 native format (length‑prefixed NAL units) is not supported for input.
 7. **ADTS only:** AAC audio must be provided as ADTS frames.  Raw AAC or other container formats (e.g. MP4 audio atoms) are not supported.
+
+## Notes on B-frames
+
+Muxide v0.1.0 assumes inputs are already in presentation order and does not perform frame reordering. Callers must not provide B-frames (i.e. streams where PTS != DTS). In v0.1.0, Muxide does not attempt to detect B-frames; providing them may produce incorrect output.
 
 ## Examples (Pseudo‑Code)
 
