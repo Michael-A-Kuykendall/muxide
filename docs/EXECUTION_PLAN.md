@@ -79,9 +79,9 @@ Each slice must define:
 
 ## 3) Work Breakdown Overview (Top‑Down)
 
-**Slice 0:** Product lock‑in (docs + scope)  
-**Slice 1:** Input contract enforcement (reject‑not‑fix)  
-**Slice 2:** Parsing infrastructure (config extraction; minimal header parsing)  
+**Slice 0:** Product lock‑in (docs + scope) ✅ COMPLETE (commit 9b7e541)  
+**Slice 1:** Input contract enforcement (reject‑not‑fix) ✅ COMPLETE (commit 294d1ab)  
+**Slice 2:** Parsing infrastructure (config extraction; minimal header parsing) ✅ COMPLETE (commit 6582232)  
 **Slice 3:** Codec expansion (HEVC, Opus, AV1; VP9 optional)  
 **Slice 4:** Ship‑grade confidence (property/fuzz/compat CI)  
 **Slice 5:** Market surface (examples + docs + HN pitch)  
