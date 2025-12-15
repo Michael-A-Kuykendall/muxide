@@ -5,7 +5,7 @@
 /// modules.  The API defined here intentionally exposes only the
 /// capabilities promised by the charter and contract documents.  It does
 /// not contain any implementation details.
-use crate::muxer::mp4::{Mp4VideoTrack, Mp4Writer, Mp4WriterError, VIDEO_TIMESCALE};
+use crate::muxer::mp4::{Mp4AudioTrack, Mp4VideoTrack, Mp4Writer, Mp4WriterError, VIDEO_TIMESCALE};
 use std::fmt;
 use std::io::Write;
 
@@ -84,17 +84,33 @@ impl<Writer> MuxerBuilder<Writer> {
             height,
             framerate,
         };
-        let audio_track = self
-            .audio
-            .map(|(codec, sample_rate, channels)| AudioTrackConfig {
-                codec,
-                sample_rate,
-                channels,
+
+        let audio_track = self.audio.and_then(|(codec, sample_rate, channels)| {
+            if codec == AudioCodec::None {
+                None
+            } else {
+                Some(AudioTrackConfig {
+                    codec,
+                    sample_rate,
+                    channels,
+                })
+            }
+        });
+
+        let mut writer = Mp4Writer::new(self.writer);
+        if let Some(audio) = &audio_track {
+            writer.enable_audio(Mp4AudioTrack {
+                sample_rate: audio.sample_rate,
+                channels: audio.channels,
             });
+        }
+
         Ok(Muxer {
-            writer: Mp4Writer::new(self.writer),
+            writer,
             video_track,
             audio_track,
+            first_video_pts: None,
+            last_audio_pts: None,
         })
     }
 }
@@ -129,8 +145,9 @@ pub struct AudioTrackConfig {
 pub struct Muxer<Writer> {
     writer: Mp4Writer<Writer>,
     video_track: VideoTrackConfig,
-    #[allow(dead_code)]
     audio_track: Option<AudioTrackConfig>,
+    first_video_pts: Option<u64>,
+    last_audio_pts: Option<u64>,
 }
 
 /// Error type for builder validation and runtime errors.
@@ -193,6 +210,9 @@ impl<Writer: Write> Muxer<Writer> {
         }
         let scaled_pts = (pts * VIDEO_TIMESCALE as f64).round();
         let pts_units = scaled_pts as u64;
+        if self.first_video_pts.is_none() {
+            self.first_video_pts = Some(pts_units);
+        }
         self.writer
             .write_video_sample(pts_units, data, is_keyframe)
             .map_err(MuxerError::from)
@@ -205,10 +225,42 @@ impl<Writer: Write> Muxer<Writer> {
     /// audio is optional and must have the same timescale as video when
     /// present.
     pub fn write_audio(&mut self, pts: f64, data: &[u8]) -> Result<(), MuxerError> {
-        let _ = (pts, data);
-        Err(MuxerError::Other(
-            "Muxer::write_audio not implemented yet".into(),
-        ))
+        if self.audio_track.is_none() {
+            return Err(MuxerError::Other("audio track not configured".into()));
+        }
+        if pts < 0.0 {
+            return Err(MuxerError::Other("audio pts must be non-negative".into()));
+        }
+        if data.is_empty() {
+            return Err(MuxerError::Other("audio frame must be non-empty".into()));
+        }
+
+        let scaled_pts = (pts * VIDEO_TIMESCALE as f64).round();
+        let pts_units = scaled_pts as u64;
+
+        if let Some(prev) = self.last_audio_pts {
+            if pts_units < prev {
+                return Err(MuxerError::Other(
+                    "audio pts must be non-decreasing".into(),
+                ));
+            }
+        }
+
+        if let Some(first_video) = self.first_video_pts {
+            if pts_units < first_video {
+                return Err(MuxerError::Other(
+                    "audio pts must not precede first video pts".into(),
+                ));
+            }
+        } else {
+            return Err(MuxerError::Other(
+                "audio must not arrive before first video frame".into(),
+            ));
+        }
+
+        self.writer.write_audio_sample(pts_units, data)?;
+        self.last_audio_pts = Some(pts_units);
+        Ok(())
     }
 
     /// Finalise the container and flush any buffered data.

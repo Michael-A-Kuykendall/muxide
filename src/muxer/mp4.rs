@@ -9,10 +9,13 @@ pub const VIDEO_TIMESCALE: u32 = 1000;
 /// Minimal MP4 writer used by the early slices.
 pub struct Mp4Writer<Writer> {
     writer: Writer,
-    samples: Vec<SampleInfo>,
-    sample_data: Vec<u8>,
-    prev_pts: Option<u64>,
-    last_delta: Option<u32>,
+    video_samples: Vec<SampleInfo>,
+    video_prev_pts: Option<u64>,
+    video_last_delta: Option<u32>,
+    audio_track: Option<Mp4AudioTrack>,
+    audio_samples: Vec<SampleInfo>,
+    audio_prev_pts: Option<u64>,
+    audio_last_delta: Option<u32>,
 }
 
 /// Simplified video track information used when writing the header.
@@ -21,8 +24,14 @@ pub struct Mp4VideoTrack {
     pub height: u32,
 }
 
+pub struct Mp4AudioTrack {
+    pub sample_rate: u32,
+    pub channels: u16,
+}
+
 struct SampleInfo {
-    size: u32,
+    pts: u64,
+    data: Vec<u8>,
     is_keyframe: bool,
     duration: Option<u32>,
 }
@@ -32,13 +41,15 @@ struct SampleTables {
     durations: Vec<u32>,
     sizes: Vec<u32>,
     keyframes: Vec<u32>,
-    chunk_offset: Option<u32>,
+    chunk_offsets: Vec<u32>,
+    samples_per_chunk: u32,
 }
 
 impl SampleTables {
     fn from_samples(
         samples: &[SampleInfo],
-        chunk_offset: Option<u32>,
+        chunk_offsets: Vec<u32>,
+        samples_per_chunk: u32,
         fallback_duration: Option<u32>,
     ) -> Self {
         let sample_count = samples.len() as u32;
@@ -53,7 +64,10 @@ impl SampleTables {
             });
             durations.push(duration);
         }
-        let sizes = samples.iter().map(|sample| sample.size).collect();
+        let sizes = samples
+            .iter()
+            .map(|sample| sample.data.len() as u32)
+            .collect();
         let keyframes = samples
             .iter()
             .enumerate()
@@ -70,7 +84,8 @@ impl SampleTables {
             durations,
             sizes,
             keyframes,
-            chunk_offset,
+            chunk_offsets,
+            samples_per_chunk,
         }
     }
 }
@@ -84,6 +99,10 @@ pub enum Mp4WriterError {
     FirstFrameMustBeKeyframe,
     /// The first keyframe must include SPS and PPS NAL units.
     FirstFrameMissingSpsPps,
+    /// Audio sample is not a valid ADTS frame.
+    InvalidAdts,
+    /// Audio track is not enabled on this writer.
+    AudioNotEnabled,
     /// Computed sample duration overflowed a `u32`.
     DurationOverflow,
 }
@@ -98,6 +117,8 @@ impl fmt::Display for Mp4WriterError {
             Mp4WriterError::FirstFrameMissingSpsPps => {
                 write!(f, "first frame must contain SPS/PPS")
             }
+            Mp4WriterError::InvalidAdts => write!(f, "invalid ADTS frame"),
+            Mp4WriterError::AudioNotEnabled => write!(f, "audio track not enabled"),
             Mp4WriterError::DurationOverflow => write!(f, "sample duration overflow"),
         }
     }
@@ -110,11 +131,18 @@ impl<Writer: Write> Mp4Writer<Writer> {
     pub fn new(writer: Writer) -> Self {
         Self {
             writer,
-            samples: Vec::new(),
-            sample_data: Vec::new(),
-            prev_pts: None,
-            last_delta: None,
+            video_samples: Vec::new(),
+            video_prev_pts: None,
+            video_last_delta: None,
+            audio_track: None,
+            audio_samples: Vec::new(),
+            audio_prev_pts: None,
+            audio_last_delta: None,
         }
+    }
+
+    pub fn enable_audio(&mut self, track: Mp4AudioTrack) {
+        self.audio_track = Some(track);
     }
 
     /// Queues a video sample for later `mdat` emission.
@@ -124,7 +152,7 @@ impl<Writer: Write> Mp4Writer<Writer> {
         data: &[u8],
         is_keyframe: bool,
     ) -> Result<(), Mp4WriterError> {
-        if let Some(prev) = self.prev_pts {
+        if let Some(prev) = self.video_prev_pts {
             if pts <= prev {
                 return Err(Mp4WriterError::NonIncreasingTimestamp);
             }
@@ -133,10 +161,10 @@ impl<Writer: Write> Mp4Writer<Writer> {
                 return Err(Mp4WriterError::DurationOverflow);
             }
             let delta = delta as u32;
-            if let Some(last) = self.samples.last_mut() {
+            if let Some(last) = self.video_samples.last_mut() {
                 last.duration = Some(delta);
             }
-            self.last_delta = Some(delta);
+            self.video_last_delta = Some(delta);
         } else {
             if !is_keyframe {
                 return Err(Mp4WriterError::FirstFrameMustBeKeyframe);
@@ -147,18 +175,52 @@ impl<Writer: Write> Mp4Writer<Writer> {
         }
 
         let converted = annexb_to_avcc(data);
-        let sample_size = converted.len();
-        if sample_size > u32::MAX as usize {
+        if converted.len() > u32::MAX as usize {
             return Err(Mp4WriterError::DurationOverflow);
         }
 
-        self.samples.push(SampleInfo {
-            size: sample_size as u32,
+        self.video_samples.push(SampleInfo {
+            pts,
+            data: converted,
             is_keyframe,
             duration: None,
         });
-        self.sample_data.extend_from_slice(&converted);
-        self.prev_pts = Some(pts);
+        self.video_prev_pts = Some(pts);
+        Ok(())
+    }
+
+    pub fn write_audio_sample(&mut self, pts: u64, data: &[u8]) -> Result<(), Mp4WriterError> {
+        if self.audio_track.is_none() {
+            return Err(Mp4WriterError::AudioNotEnabled);
+        }
+
+        if let Some(prev) = self.audio_prev_pts {
+            if pts < prev {
+                return Err(Mp4WriterError::NonIncreasingTimestamp);
+            }
+            let delta = pts - prev;
+            if delta > u64::from(u32::MAX) {
+                return Err(Mp4WriterError::DurationOverflow);
+            }
+            let delta = delta as u32;
+            if let Some(last) = self.audio_samples.last_mut() {
+                last.duration = Some(delta);
+            }
+            self.audio_last_delta = Some(delta);
+        }
+
+        let raw = adts_to_raw(data).ok_or(Mp4WriterError::InvalidAdts)?;
+        if raw.len() > u32::MAX as usize {
+            return Err(Mp4WriterError::DurationOverflow);
+        }
+
+        self.audio_samples.push(SampleInfo {
+            pts,
+            data: raw.to_vec(),
+            is_keyframe: false,
+            duration: None,
+        });
+        self.audio_prev_pts = Some(pts);
         Ok(())
     }
 
@@ -168,18 +230,109 @@ impl<Writer: Write> Mp4Writer<Writer> {
         let ftyp_len = ftyp_box.len() as u32;
         self.writer.write_all(&ftyp_box)?;
 
-        let chunk_offset = if !self.sample_data.is_empty() {
-            let mdat_size = 8 + self.sample_data.len() as u32;
-            self.writer.write_all(&mdat_size.to_be_bytes())?;
-            self.writer.write_all(b"mdat")?;
-            self.writer.write_all(&self.sample_data)?;
-            Some(ftyp_len + 8)
-        } else {
-            None
-        };
+        let audio_present = self.audio_track.is_some();
+        if !audio_present {
+            let chunk_offset = if !self.video_samples.is_empty() {
+                let mut payload_size: u32 = 0;
+                for sample in &self.video_samples {
+                    payload_size += sample.data.len() as u32;
+                }
 
-        let tables = SampleTables::from_samples(&self.samples, chunk_offset, self.last_delta);
-        let moov_box = build_moov_box(video, &tables);
+                let mdat_size = 8 + payload_size;
+                self.writer.write_all(&mdat_size.to_be_bytes())?;
+                self.writer.write_all(b"mdat")?;
+                for sample in &self.video_samples {
+                    self.writer.write_all(&sample.data)?;
+                }
+                Some(ftyp_len + 8)
+            } else {
+                None
+            };
+
+            let (chunk_offsets, samples_per_chunk) = match chunk_offset {
+                Some(offset) => (vec![offset], self.video_samples.len() as u32),
+                None => (Vec::new(), 0),
+            };
+
+            let tables = SampleTables::from_samples(
+                &self.video_samples,
+                chunk_offsets,
+                samples_per_chunk,
+                self.video_last_delta,
+            );
+            let moov_box = build_moov_box(video, &tables, None);
+            return self.writer.write_all(&moov_box);
+        }
+
+        let mut total_payload_size: u32 = 0;
+        for sample in &self.video_samples {
+            total_payload_size += sample.data.len() as u32;
+        }
+        for sample in &self.audio_samples {
+            total_payload_size += sample.data.len() as u32;
+        }
+
+        let mdat_size = 8 + total_payload_size;
+        self.writer.write_all(&mdat_size.to_be_bytes())?;
+        self.writer.write_all(b"mdat")?;
+
+        #[derive(Clone, Copy)]
+        enum TrackKind {
+            Video,
+            Audio,
+        }
+
+        let mut schedule: Vec<(u64, TrackKind, usize)> = Vec::new();
+        for (idx, sample) in self.video_samples.iter().enumerate() {
+            schedule.push((sample.pts, TrackKind::Video, idx));
+        }
+        for (idx, sample) in self.audio_samples.iter().enumerate() {
+            schedule.push((sample.pts, TrackKind::Audio, idx));
+        }
+        schedule.sort_by_key(|(pts, kind, idx)| {
+            let kind_order = match kind {
+                TrackKind::Video => 0u8,
+                TrackKind::Audio => 1u8,
+            };
+            (*pts, kind_order, *idx)
+        });
+
+        let mut video_chunk_offsets = Vec::with_capacity(self.video_samples.len());
+        let mut audio_chunk_offsets = Vec::with_capacity(self.audio_samples.len());
+        let mut cursor = ftyp_len + 8;
+
+        for (_, kind, idx) in schedule {
+            match kind {
+                TrackKind::Video => {
+                    video_chunk_offsets.push(cursor);
+                    let sample = &self.video_samples[idx];
+                    self.writer.write_all(&sample.data)?;
+                    cursor += sample.data.len() as u32;
+                }
+                TrackKind::Audio => {
+                    audio_chunk_offsets.push(cursor);
+                    let sample = &self.audio_samples[idx];
+                    self.writer.write_all(&sample.data)?;
+                    cursor += sample.data.len() as u32;
+                }
+            }
+        }
+
+        let video_tables = SampleTables::from_samples(
+            &self.video_samples,
+            video_chunk_offsets,
+            1,
+            self.video_last_delta,
+        );
+        let audio_tables = SampleTables::from_samples(
+            &self.audio_samples,
+            audio_chunk_offsets,
+            1,
+            self.audio_last_delta,
+        );
+
+        let audio_track = self.audio_track.as_ref().expect("audio_present implies track");
+        let moov_box = build_moov_box(video, &video_tables, Some((audio_track, &audio_tables)));
         self.writer.write_all(&moov_box)
     }
 }
@@ -223,6 +376,34 @@ fn annexb_to_avcc(data: &[u8]) -> Vec<u8> {
 
 fn annexb_iter_nals(mut data: &[u8]) -> AnnexBNalIter<'_> {
     AnnexBNalIter { data, cursor: 0 }
+}
+
+fn adts_to_raw(frame: &[u8]) -> Option<&[u8]> {
+    if frame.len() < 7 {
+        return None;
+    }
+
+    // Syncword 0xFFF (12 bits)
+    if frame[0] != 0xFF || (frame[1] & 0xF0) != 0xF0 {
+        return None;
+    }
+
+    let protection_absent = (frame[1] & 0x01) != 0;
+    let header_len = if protection_absent { 7 } else { 9 };
+    if frame.len() < header_len {
+        return None;
+    }
+
+    // aac_frame_length: 13 bits across bytes 3..5 (includes header)
+    let aac_frame_length: usize = (((frame[3] & 0x03) as usize) << 11)
+        | ((frame[4] as usize) << 3)
+        | (((frame[5] & 0xE0) as usize) >> 5);
+
+    if aac_frame_length < header_len || aac_frame_length > frame.len() {
+        return None;
+    }
+
+    Some(&frame[header_len..aac_frame_length])
 }
 
 struct AnnexBNalIter<'a> {
@@ -269,15 +450,168 @@ fn find_start_code(data: &[u8], from: usize) -> Option<(usize, usize)> {
     None
 }
 
-fn build_moov_box(video: &Mp4VideoTrack, tables: &SampleTables) -> Vec<u8> {
+fn build_moov_box(
+    video: &Mp4VideoTrack,
+    video_tables: &SampleTables,
+    audio: Option<(&Mp4AudioTrack, &SampleTables)>,
+) -> Vec<u8> {
     let mvhd_payload = build_mvhd_payload();
     let mvhd_box = build_box(b"mvhd", &mvhd_payload);
-    let trak_box = build_trak_box(video, tables);
+    let trak_box = build_trak_box(video, video_tables);
 
     let mut payload = Vec::new();
     payload.extend_from_slice(&mvhd_box);
     payload.extend_from_slice(&trak_box);
+    if let Some((audio_track, audio_tables)) = audio {
+        let audio_trak = build_audio_trak_box(audio_track, audio_tables);
+        payload.extend_from_slice(&audio_trak);
+    }
     build_box(b"moov", &payload)
+}
+
+fn build_audio_trak_box(audio: &Mp4AudioTrack, tables: &SampleTables) -> Vec<u8> {
+    let tkhd_box = build_audio_tkhd_box();
+    let mdia_box = build_audio_mdia_box(audio, tables);
+
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&tkhd_box);
+    payload.extend_from_slice(&mdia_box);
+    build_box(b"trak", &payload)
+}
+
+fn build_audio_tkhd_box() -> Vec<u8> {
+    build_tkhd_box_with_id(2, 0x0100, 0, 0)
+}
+
+fn build_audio_mdia_box(audio: &Mp4AudioTrack, tables: &SampleTables) -> Vec<u8> {
+    let mdhd_box = build_mdhd_box_with_timescale(VIDEO_TIMESCALE);
+    let hdlr_box = build_sound_hdlr_box();
+    let minf_box = build_audio_minf_box(audio, tables);
+
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&mdhd_box);
+    payload.extend_from_slice(&hdlr_box);
+    payload.extend_from_slice(&minf_box);
+    build_box(b"mdia", &payload)
+}
+
+fn build_audio_minf_box(audio: &Mp4AudioTrack, tables: &SampleTables) -> Vec<u8> {
+    let smhd_box = build_smhd_box();
+    let dinf_box = build_dinf_box();
+    let stbl_box = build_audio_stbl_box(audio, tables);
+
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&smhd_box);
+    payload.extend_from_slice(&dinf_box);
+    payload.extend_from_slice(&stbl_box);
+    build_box(b"minf", &payload)
+}
+
+fn build_audio_stbl_box(audio: &Mp4AudioTrack, tables: &SampleTables) -> Vec<u8> {
+    let stsd_box = build_audio_stsd_box(audio);
+    let stts_box = build_stts_box(&tables.durations);
+    let stsc_box = build_stsc_box(tables.samples_per_chunk, tables.chunk_offsets.len() as u32);
+    let stsz_box = build_stsz_box(&tables.sizes);
+    let stco_box = build_stco_box(&tables.chunk_offsets);
+
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&stsd_box);
+    payload.extend_from_slice(&stts_box);
+    payload.extend_from_slice(&stsc_box);
+    payload.extend_from_slice(&stsz_box);
+    payload.extend_from_slice(&stco_box);
+    build_box(b"stbl", &payload)
+}
+
+fn build_audio_stsd_box(audio: &Mp4AudioTrack) -> Vec<u8> {
+    let mp4a_box = build_mp4a_box(audio);
+
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&0u32.to_be_bytes());
+    payload.extend_from_slice(&1u32.to_be_bytes());
+    payload.extend_from_slice(&mp4a_box);
+    build_box(b"stsd", &payload)
+}
+
+fn build_mp4a_box(audio: &Mp4AudioTrack) -> Vec<u8> {
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&[0u8; 6]);
+    payload.extend_from_slice(&1u16.to_be_bytes());
+    payload.extend_from_slice(&0u32.to_be_bytes());
+    payload.extend_from_slice(&0u32.to_be_bytes());
+    payload.extend_from_slice(&audio.channels.to_be_bytes());
+    payload.extend_from_slice(&16u16.to_be_bytes());
+    payload.extend_from_slice(&0u16.to_be_bytes());
+    payload.extend_from_slice(&0u16.to_be_bytes());
+    let rate_fixed = (audio.sample_rate as u32) << 16;
+    payload.extend_from_slice(&rate_fixed.to_be_bytes());
+    let esds = build_esds_box(audio);
+    payload.extend_from_slice(&esds);
+    build_box(b"mp4a", &payload)
+}
+
+fn build_esds_box(audio: &Mp4AudioTrack) -> Vec<u8> {
+    let asc = build_audio_specific_config(audio.sample_rate, audio.channels);
+
+    let mut dec_specific = Vec::new();
+    dec_specific.push(0x05);
+    dec_specific.push(asc.len() as u8);
+    dec_specific.extend_from_slice(&asc);
+
+    let mut dec_config_payload = Vec::new();
+    dec_config_payload.push(0x40);
+    dec_config_payload.push(0x15);
+    dec_config_payload.extend_from_slice(&[0x00, 0x00, 0x00]);
+    dec_config_payload.extend_from_slice(&0u32.to_be_bytes());
+    dec_config_payload.extend_from_slice(&0u32.to_be_bytes());
+    dec_config_payload.extend_from_slice(&dec_specific);
+
+    let mut dec_config = Vec::new();
+    dec_config.push(0x04);
+    dec_config.push(dec_config_payload.len() as u8);
+    dec_config.extend_from_slice(&dec_config_payload);
+
+    let sl_config = [0x06u8, 0x01u8, 0x02u8];
+
+    let mut es_payload = Vec::new();
+    es_payload.extend_from_slice(&1u16.to_be_bytes());
+    es_payload.push(0);
+    es_payload.extend_from_slice(&dec_config);
+    es_payload.extend_from_slice(&sl_config);
+
+    let mut es_desc = Vec::new();
+    es_desc.push(0x03);
+    es_desc.push(es_payload.len() as u8);
+    es_desc.extend_from_slice(&es_payload);
+
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&0u32.to_be_bytes());
+    payload.extend_from_slice(&es_desc);
+    build_box(b"esds", &payload)
+}
+
+fn build_audio_specific_config(sample_rate: u32, channels: u16) -> [u8; 2] {
+    let sfi = match sample_rate {
+        96000 => 0,
+        88200 => 1,
+        64000 => 2,
+        48000 => 3,
+        44100 => 4,
+        32000 => 5,
+        24000 => 6,
+        22050 => 7,
+        16000 => 8,
+        12000 => 9,
+        11025 => 10,
+        8000 => 11,
+        7350 => 12,
+        _ => 4,
+    };
+    let aot = 2u8;
+    let chan = (channels.min(15) as u8) & 0x0f;
+    let byte0 = (aot << 3) | (sfi >> 1);
+    let byte1 = ((sfi & 1) << 7) | (chan << 3);
+    [byte0, byte1]
 }
 
 fn build_trak_box(video: &Mp4VideoTrack, tables: &SampleTables) -> Vec<u8> {
@@ -317,9 +651,9 @@ fn build_minf_box(video: &Mp4VideoTrack, tables: &SampleTables) -> Vec<u8> {
 fn build_stbl_box(video: &Mp4VideoTrack, tables: &SampleTables) -> Vec<u8> {
     let stsd_box = build_stsd_box(video);
     let stts_box = build_stts_box(&tables.durations);
-    let stsc_box = build_stsc_box(tables.sample_count);
+    let stsc_box = build_stsc_box(tables.samples_per_chunk, tables.chunk_offsets.len() as u32);
     let stsz_box = build_stsz_box(&tables.sizes);
-    let stco_box = build_stco_box(tables.chunk_offset);
+    let stco_box = build_stco_box(&tables.chunk_offsets);
 
     let mut payload = Vec::new();
     payload.extend_from_slice(&stsd_box);
@@ -366,18 +700,18 @@ fn build_stts_box(durations: &[u32]) -> Vec<u8> {
     build_box(b"stts", &payload)
 }
 
-fn build_stsc_box(sample_count: u32) -> Vec<u8> {
+fn build_stsc_box(samples_per_chunk: u32, chunk_count: u32) -> Vec<u8> {
     let mut payload = Vec::new();
     payload.extend_from_slice(&0u32.to_be_bytes());
 
-    if sample_count == 0 {
+    if chunk_count == 0 || samples_per_chunk == 0 {
         payload.extend_from_slice(&0u32.to_be_bytes());
         return build_box(b"stsc", &payload);
     }
 
     payload.extend_from_slice(&1u32.to_be_bytes());
     payload.extend_from_slice(&1u32.to_be_bytes());
-    payload.extend_from_slice(&sample_count.to_be_bytes());
+    payload.extend_from_slice(&samples_per_chunk.to_be_bytes());
     payload.extend_from_slice(&1u32.to_be_bytes());
     build_box(b"stsc", &payload)
 }
@@ -393,14 +727,13 @@ fn build_stsz_box(sizes: &[u32]) -> Vec<u8> {
     build_box(b"stsz", &payload)
 }
 
-fn build_stco_box(chunk_offset: Option<u32>) -> Vec<u8> {
+fn build_stco_box(chunk_offsets: &[u32]) -> Vec<u8> {
     let mut payload = Vec::new();
     payload.extend_from_slice(&0u32.to_be_bytes());
-    if let Some(offset) = chunk_offset {
-        payload.extend_from_slice(&1u32.to_be_bytes());
+
+    payload.extend_from_slice(&(chunk_offsets.len() as u32).to_be_bytes());
+    for offset in chunk_offsets {
         payload.extend_from_slice(&offset.to_be_bytes());
-    } else {
-        payload.extend_from_slice(&0u32.to_be_bytes());
     }
     build_box(b"stco", &payload)
 }
@@ -485,11 +818,15 @@ fn build_url_box() -> Vec<u8> {
 }
 
 fn build_mdhd_box() -> Vec<u8> {
+    build_mdhd_box_with_timescale(VIDEO_TIMESCALE)
+}
+
+fn build_mdhd_box_with_timescale(timescale: u32) -> Vec<u8> {
     let mut payload = Vec::new();
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
-    payload.extend_from_slice(&VIDEO_TIMESCALE.to_be_bytes());
+    payload.extend_from_slice(&timescale.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&0x55c4u16.to_be_bytes());
     payload.extend_from_slice(&0u16.to_be_bytes());
@@ -507,18 +844,41 @@ fn build_hdlr_box() -> Vec<u8> {
     build_box(b"hdlr", &payload)
 }
 
+fn build_sound_hdlr_box() -> Vec<u8> {
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&0u32.to_be_bytes());
+    payload.extend_from_slice(&0u32.to_be_bytes());
+    payload.extend_from_slice(b"soun");
+    payload.extend_from_slice(&[0u8; 12]);
+    payload.extend_from_slice(b"SoundHandler");
+    payload.push(0);
+    build_box(b"hdlr", &payload)
+}
+
+fn build_smhd_box() -> Vec<u8> {
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&0u32.to_be_bytes());
+    payload.extend_from_slice(&0u16.to_be_bytes());
+    payload.extend_from_slice(&0u16.to_be_bytes());
+    build_box(b"smhd", &payload)
+}
+
 fn build_tkhd_box(video: &Mp4VideoTrack) -> Vec<u8> {
+    build_tkhd_box_with_id(1, 0, video.width, video.height)
+}
+
+fn build_tkhd_box_with_id(track_id: u32, volume: u16, width: u32, height: u32) -> Vec<u8> {
     let mut payload = Vec::new();
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
-    payload.extend_from_slice(&1u32.to_be_bytes());
+    payload.extend_from_slice(&track_id.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&0u64.to_be_bytes());
     payload.extend_from_slice(&0u64.to_be_bytes());
     payload.extend_from_slice(&0u16.to_be_bytes());
     payload.extend_from_slice(&0u16.to_be_bytes());
-    payload.extend_from_slice(&0u16.to_be_bytes());
+    payload.extend_from_slice(&volume.to_be_bytes());
     payload.extend_from_slice(&0u16.to_be_bytes());
     let matrix = [
         0x0001_0000_u32,
@@ -534,8 +894,8 @@ fn build_tkhd_box(video: &Mp4VideoTrack) -> Vec<u8> {
     for value in matrix {
         payload.extend_from_slice(&value.to_be_bytes());
     }
-    let width_fixed = (video.width << 16) as u32;
-    let height_fixed = (video.height << 16) as u32;
+    let width_fixed = (width << 16) as u32;
+    let height_fixed = (height << 16) as u32;
     payload.extend_from_slice(&width_fixed.to_be_bytes());
     payload.extend_from_slice(&height_fixed.to_be_bytes());
     build_box(b"tkhd", &payload)
