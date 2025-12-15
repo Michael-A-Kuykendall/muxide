@@ -221,7 +221,11 @@ impl<Writer> MuxerBuilder<Writer> {
             metadata: self.metadata,
             fast_start: self.fast_start,
             first_video_pts: None,
+            last_video_pts: None,
+            last_video_dts: None,
             last_audio_pts: None,
+            video_frame_count: 0,
+            audio_frame_count: 0,
             finished: false,
         })
     }
@@ -260,12 +264,19 @@ pub struct Muxer<Writer> {
     audio_track: Option<AudioTrackConfig>,
     metadata: Option<Metadata>,
     fast_start: bool,
-    first_video_pts: Option<u64>,
-    last_audio_pts: Option<u64>,
+    first_video_pts: Option<f64>,
+    last_video_pts: Option<f64>,
+    last_video_dts: Option<f64>,
+    last_audio_pts: Option<f64>,
+    video_frame_count: u64,
+    audio_frame_count: u64,
     finished: bool,
 }
 
 /// Error type for builder validation and runtime errors.
+///
+/// All errors include context to help diagnose issues. Error messages are designed
+/// to be educational—they explain what went wrong and how to fix it.
 #[derive(Debug)]
 pub enum MuxerError {
     /// Video configuration is missing.  In v0, a video track is required.
@@ -275,25 +286,52 @@ pub enum MuxerError {
     /// The muxer has already been finished.
     AlreadyFinished,
     /// Video `pts` must be non-negative.
-    NegativeVideoPts,
+    NegativeVideoPts {
+        pts: f64,
+        frame_index: u64,
+    },
     /// Audio `pts` must be non-negative.
-    NegativeAudioPts,
+    NegativeAudioPts {
+        pts: f64,
+        frame_index: u64,
+    },
     /// Audio was written but no audio track was configured.
     AudioNotConfigured,
     /// Audio sample is empty.
-    EmptyAudioFrame,
+    EmptyAudioFrame {
+        frame_index: u64,
+    },
     /// Video timestamps must be strictly increasing.
-    NonIncreasingVideoPts,
+    NonIncreasingVideoPts {
+        prev_pts: f64,
+        curr_pts: f64,
+        frame_index: u64,
+    },
     /// Audio timestamps must be non-decreasing.
-    NonDecreasingAudioPts,
+    DecreasingAudioPts {
+        prev_pts: f64,
+        curr_pts: f64,
+        frame_index: u64,
+    },
     /// Audio may not precede the first video frame.
-    AudioBeforeFirstVideo,
+    AudioBeforeFirstVideo {
+        audio_pts: f64,
+        first_video_pts: Option<f64>,
+    },
     /// The first video frame must be a keyframe.
     FirstVideoFrameMustBeKeyframe,
     /// The first video frame must include SPS/PPS.
     FirstVideoFrameMissingSpsPps,
     /// Audio sample is not a valid ADTS frame.
-    InvalidAdts,
+    InvalidAdts {
+        frame_index: u64,
+    },
+    /// DTS must be monotonically increasing.
+    NonIncreasingDts {
+        prev_dts: f64,
+        curr_dts: f64,
+        frame_index: u64,
+    },
 }
 
 impl From<std::io::Error> for MuxerError {
@@ -302,49 +340,66 @@ impl From<std::io::Error> for MuxerError {
     }
 }
 
-impl From<Mp4WriterError> for MuxerError {
-    fn from(err: Mp4WriterError) -> Self {
-        match err {
-            Mp4WriterError::NonIncreasingTimestamp => MuxerError::NonIncreasingVideoPts,
-            Mp4WriterError::FirstFrameMustBeKeyframe => MuxerError::FirstVideoFrameMustBeKeyframe,
-            Mp4WriterError::FirstFrameMissingSpsPps => MuxerError::FirstVideoFrameMissingSpsPps,
-            Mp4WriterError::InvalidAdts => MuxerError::InvalidAdts,
-            Mp4WriterError::AudioNotEnabled => MuxerError::AudioNotConfigured,
-            Mp4WriterError::DurationOverflow => MuxerError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "duration overflow",
-            )),
-            Mp4WriterError::AlreadyFinalized => MuxerError::AlreadyFinished,
-        }
-    }
-}
-
 impl fmt::Display for MuxerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            MuxerError::MissingVideoConfig => write!(f, "missing video configuration"),
-            MuxerError::Io(err) => write!(f, "io error: {}", err),
-            MuxerError::AlreadyFinished => write!(f, "muxer already finished"),
-            MuxerError::NegativeVideoPts => write!(f, "video pts must be non-negative"),
-            MuxerError::NegativeAudioPts => write!(f, "audio pts must be non-negative"),
-            MuxerError::AudioNotConfigured => write!(f, "audio track not configured"),
-            MuxerError::EmptyAudioFrame => write!(f, "audio frame must be non-empty"),
-            MuxerError::NonIncreasingVideoPts => {
-                write!(f, "video pts must be strictly increasing")
+            MuxerError::MissingVideoConfig => {
+                write!(f, "missing video configuration: call .video() on MuxerBuilder before .build()")
             }
-            MuxerError::NonDecreasingAudioPts => {
-                write!(f, "audio pts must be non-decreasing")
+            MuxerError::Io(err) => write!(f, "IO error: {}", err),
+            MuxerError::AlreadyFinished => {
+                write!(f, "muxer already finished: cannot write frames after calling finish()")
             }
-            MuxerError::AudioBeforeFirstVideo => {
-                write!(f, "audio must not arrive before first video frame")
+            MuxerError::NegativeVideoPts { pts, frame_index } => {
+                write!(f, "video frame {} has negative PTS ({:.3}s): timestamps must be >= 0.0", 
+                       frame_index, pts)
+            }
+            MuxerError::NegativeAudioPts { pts, frame_index } => {
+                write!(f, "audio frame {} has negative PTS ({:.3}s): timestamps must be >= 0.0",
+                       frame_index, pts)
+            }
+            MuxerError::AudioNotConfigured => {
+                write!(f, "audio track not configured: call .audio() on MuxerBuilder to enable audio")
+            }
+            MuxerError::EmptyAudioFrame { frame_index } => {
+                write!(f, "audio frame {} is empty: ADTS frames must contain data", frame_index)
+            }
+            MuxerError::NonIncreasingVideoPts { prev_pts, curr_pts, frame_index } => {
+                write!(f, "video frame {} has PTS {:.3}s which is not greater than previous PTS {:.3}s: \
+                          video timestamps must strictly increase. For B-frames, use write_video_with_dts()",
+                       frame_index, curr_pts, prev_pts)
+            }
+            MuxerError::DecreasingAudioPts { prev_pts, curr_pts, frame_index } => {
+                write!(f, "audio frame {} has PTS {:.3}s which is less than previous PTS {:.3}s: \
+                          audio timestamps must not decrease",
+                       frame_index, curr_pts, prev_pts)
+            }
+            MuxerError::AudioBeforeFirstVideo { audio_pts, first_video_pts } => {
+                match first_video_pts {
+                    Some(v) => write!(f, "audio PTS {:.3}s arrives before first video PTS {:.3}s: \
+                                         write video frames first, or ensure audio PTS >= video PTS",
+                                      audio_pts, v),
+                    None => write!(f, "audio frame arrived before any video frame: \
+                                       write at least one video frame before writing audio"),
+                }
             }
             MuxerError::FirstVideoFrameMustBeKeyframe => {
-                write!(f, "first video frame must be a keyframe")
+                write!(f, "first video frame must be a keyframe (IDR): \
+                          set is_keyframe=true and ensure the frame contains an IDR NAL unit")
             }
             MuxerError::FirstVideoFrameMissingSpsPps => {
-                write!(f, "first video frame must contain SPS/PPS")
+                write!(f, "first video frame must contain SPS and PPS NAL units: \
+                          prepend SPS (NAL type 7) and PPS (NAL type 8) to the first keyframe")
             }
-            MuxerError::InvalidAdts => write!(f, "invalid ADTS frame"),
+            MuxerError::InvalidAdts { frame_index } => {
+                write!(f, "audio frame {} is not valid ADTS: ensure the frame starts with 0xFFF sync word",
+                       frame_index)
+            }
+            MuxerError::NonIncreasingDts { prev_dts, curr_dts, frame_index } => {
+                write!(f, "video frame {} has DTS {:.3}s which is not greater than previous DTS {:.3}s: \
+                          DTS (decode timestamps) must strictly increase",
+                       frame_index, curr_dts, prev_dts)
+            }
         }
     }
 }
@@ -375,9 +430,11 @@ impl<Writer: Write> Muxer<Writer> {
 
     /// Write a video frame to the container.
     ///
-    /// `pts` is the presentation timestamp in seconds.  In v0, frames must
-    /// be supplied in monotonically increasing order.  The `data` slice
+    /// `pts` is the presentation timestamp in seconds.  Frames must
+    /// be supplied in strictly increasing PTS order.  The `data` slice
     /// contains the encoded frame bitstream in Annex B format (for H.264).
+    ///
+    /// For streams with B-frames (where PTS != DTS), use `write_video_with_dts()` instead.
     pub fn write_video(
         &mut self,
         pts: f64,
@@ -387,17 +444,39 @@ impl<Writer: Write> Muxer<Writer> {
         if self.finished {
             return Err(MuxerError::AlreadyFinished);
         }
+        
+        let frame_index = self.video_frame_count;
+        
+        // Validate PTS is non-negative
         if pts < 0.0 {
-            return Err(MuxerError::NegativeVideoPts);
+            return Err(MuxerError::NegativeVideoPts { pts, frame_index });
         }
+        
+        // Validate PTS is strictly increasing
+        if let Some(prev) = self.last_video_pts {
+            if pts <= prev {
+                return Err(MuxerError::NonIncreasingVideoPts {
+                    prev_pts: prev,
+                    curr_pts: pts,
+                    frame_index,
+                });
+            }
+        }
+        
         let scaled_pts = (pts * MEDIA_TIMESCALE as f64).round();
         let pts_units = scaled_pts as u64;
+        
         if self.first_video_pts.is_none() {
-            self.first_video_pts = Some(pts_units);
+            self.first_video_pts = Some(pts);
         }
+        
         self.writer
             .write_video_sample(pts_units, data, is_keyframe)
-            .map_err(MuxerError::from)
+            .map_err(|e| self.convert_mp4_error(e, frame_index))?;
+        
+        self.last_video_pts = Some(pts);
+        self.video_frame_count += 1;
+        Ok(())
     }
 
     /// Write a video frame with explicit decode timestamp for B-frame support.
@@ -405,10 +484,14 @@ impl<Writer: Write> Muxer<Writer> {
     /// - `pts` is the presentation timestamp in seconds (display order)
     /// - `dts` is the decode timestamp in seconds (decode order)
     /// 
-    /// For B-frames, PTS > DTS because the frame is displayed later than it's decoded.
-    /// DTS must be monotonically increasing.
+    /// For streams with B-frames, PTS and DTS may differ. The only constraint is that
+    /// DTS must be strictly monotonically increasing (frames must be fed in decode order).
     ///
-    /// Example GOP: I B B P with DTS 0,1,2,3 and PTS 0,2,3,1
+    /// Example GOP: I P B B where decode order is I,P,B,B but display order is I,B,B,P
+    /// - I: DTS=0, PTS=0
+    /// - P: DTS=1, PTS=3 (decoded second, displayed fourth)
+    /// - B: DTS=2, PTS=1 (decoded third, displayed second)
+    /// - B: DTS=3, PTS=2 (decoded fourth, displayed third)
     pub fn write_video_with_dts(
         &mut self,
         pts: f64,
@@ -419,31 +502,77 @@ impl<Writer: Write> Muxer<Writer> {
         if self.finished {
             return Err(MuxerError::AlreadyFinished);
         }
+        
+        let frame_index = self.video_frame_count;
+        
+        // Validate PTS is non-negative
         if pts < 0.0 {
-            return Err(MuxerError::NegativeVideoPts);
+            return Err(MuxerError::NegativeVideoPts { pts, frame_index });
         }
+        
+        // Validate DTS is non-negative
         if dts < 0.0 {
-            return Err(MuxerError::NegativeVideoPts);
+            return Err(MuxerError::NegativeVideoPts { pts: dts, frame_index });
         }
+        
+        // Note: PTS can be less than DTS for B-frames (displayed before their decode position)
+        // This is valid and expected for B-frame streams.
+        
+        // Validate DTS is strictly increasing
+        if let Some(prev_dts) = self.last_video_dts {
+            if dts <= prev_dts {
+                return Err(MuxerError::NonIncreasingDts {
+                    prev_dts,
+                    curr_dts: dts,
+                    frame_index,
+                });
+            }
+        }
+        
         let scaled_pts = (pts * MEDIA_TIMESCALE as f64).round();
         let pts_units = scaled_pts as u64;
         let scaled_dts = (dts * MEDIA_TIMESCALE as f64).round();
         let dts_units = scaled_dts as u64;
         
         if self.first_video_pts.is_none() {
-            self.first_video_pts = Some(pts_units);
+            self.first_video_pts = Some(pts);
         }
+        
         self.writer
             .write_video_sample_with_dts(pts_units, dts_units, data, is_keyframe)
-            .map_err(MuxerError::from)
+            .map_err(|e| self.convert_mp4_error(e, frame_index))?;
+        
+        self.last_video_pts = Some(pts);
+        self.last_video_dts = Some(dts);
+        self.video_frame_count += 1;
+        Ok(())
+    }
+    
+    /// Convert internal Mp4WriterError to MuxerError with context
+    fn convert_mp4_error(&self, err: Mp4WriterError, frame_index: u64) -> MuxerError {
+        match err {
+            Mp4WriterError::NonIncreasingTimestamp => MuxerError::NonIncreasingVideoPts {
+                prev_pts: self.last_video_pts.unwrap_or(0.0),
+                curr_pts: 0.0, // We don't have access here, but validation above catches this
+                frame_index,
+            },
+            Mp4WriterError::FirstFrameMustBeKeyframe => MuxerError::FirstVideoFrameMustBeKeyframe,
+            Mp4WriterError::FirstFrameMissingSpsPps => MuxerError::FirstVideoFrameMissingSpsPps,
+            Mp4WriterError::InvalidAdts => MuxerError::InvalidAdts { frame_index },
+            Mp4WriterError::AudioNotEnabled => MuxerError::AudioNotConfigured,
+            Mp4WriterError::DurationOverflow => MuxerError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "duration overflow",
+            )),
+            Mp4WriterError::AlreadyFinalized => MuxerError::AlreadyFinished,
+        }
     }
 
     /// Write an audio frame to the container.
     ///
     /// `pts` is the presentation timestamp in seconds.  The `data` slice
-    /// contains the encoded audio frame (e.g. an AAC ADTS frame).  In v0,
-    /// audio is optional and must have the same timescale as video when
-    /// present.
+    /// contains the encoded audio frame (an AAC ADTS frame).
+    /// Audio timestamps must be non-decreasing and must not precede the first video frame.
     pub fn write_audio(&mut self, pts: f64, data: &[u8]) -> Result<(), MuxerError> {
         if self.finished {
             return Err(MuxerError::AlreadyFinished);
@@ -451,32 +580,53 @@ impl<Writer: Write> Muxer<Writer> {
         if self.audio_track.is_none() {
             return Err(MuxerError::AudioNotConfigured);
         }
+        
+        let frame_index = self.audio_frame_count;
+        
+        // Validate PTS is non-negative
         if pts < 0.0 {
-            return Err(MuxerError::NegativeAudioPts);
+            return Err(MuxerError::NegativeAudioPts { pts, frame_index });
         }
+        
+        // Validate frame is not empty
         if data.is_empty() {
-            return Err(MuxerError::EmptyAudioFrame);
+            return Err(MuxerError::EmptyAudioFrame { frame_index });
+        }
+        
+        // Validate PTS is non-decreasing
+        if let Some(prev) = self.last_audio_pts {
+            if pts < prev {
+                return Err(MuxerError::DecreasingAudioPts {
+                    prev_pts: prev,
+                    curr_pts: pts,
+                    frame_index,
+                });
+            }
+        }
+        
+        // Validate audio doesn't precede first video
+        if let Some(first_video) = self.first_video_pts {
+            if pts < first_video {
+                return Err(MuxerError::AudioBeforeFirstVideo {
+                    audio_pts: pts,
+                    first_video_pts: Some(first_video),
+                });
+            }
+        } else {
+            return Err(MuxerError::AudioBeforeFirstVideo {
+                audio_pts: pts,
+                first_video_pts: None,
+            });
         }
 
         let scaled_pts = (pts * MEDIA_TIMESCALE as f64).round();
         let pts_units = scaled_pts as u64;
-
-        if let Some(prev) = self.last_audio_pts {
-            if pts_units < prev {
-                return Err(MuxerError::NonDecreasingAudioPts);
-            }
-        }
-
-        if let Some(first_video) = self.first_video_pts {
-            if pts_units < first_video {
-                return Err(MuxerError::AudioBeforeFirstVideo);
-            }
-        } else {
-            return Err(MuxerError::AudioBeforeFirstVideo);
-        }
-
-        self.writer.write_audio_sample(pts_units, data)?;
-        self.last_audio_pts = Some(pts_units);
+        
+        self.writer.write_audio_sample(pts_units, data)
+            .map_err(|e| self.convert_mp4_error(e, frame_index))?;
+        
+        self.last_audio_pts = Some(pts);
+        self.audio_frame_count += 1;
         Ok(())
     }
 
