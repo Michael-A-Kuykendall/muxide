@@ -1,0 +1,9 @@
+## Muxide library crate
+## This file defines the package metadata and dependencies for the Muxide crate.
+
+[package]
+name = "muxide"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
