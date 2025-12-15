@@ -44,8 +44,8 @@ fn video_samples_writes_mdat_and_tables() -> Result<(), Box<dyn std::error::Erro
         .build()?;
 
     muxer.write_video(0.0, &frame0, true)?;
-    muxer.write_video(0.033, &frame1, false)?;
-    muxer.write_video(0.066, &frame2, false)?;
+    muxer.write_video(1.0 / 30.0, &frame1, false)?;
+    muxer.write_video(2.0 / 30.0, &frame2, false)?;
     muxer.finish()?;
 
     let produced = buffer.lock().unwrap();
@@ -79,12 +79,12 @@ fn video_samples_writes_mdat_and_tables() -> Result<(), Box<dyn std::error::Erro
     let stbl = find_box(minf_payload, *b"stbl");
     let stbl_payload = stbl.payload(minf_payload);
 
-    // stts: single entry with count=3, delta=33 (ms).
+    // stts: single entry with count=3, delta=3000 (90kHz / 30fps).
     let stts = find_box(stbl_payload, *b"stts");
     let stts_payload = stts.payload(stbl_payload);
     assert_eq!(be_u32(&stts_payload[4..8]), 1);
     assert_eq!(be_u32(&stts_payload[8..12]), 3);
-    assert_eq!(be_u32(&stts_payload[12..16]), 33);
+    assert_eq!(be_u32(&stts_payload[12..16]), 3000);
 
     // stsc: one chunk containing all 3 samples.
     let stsc = find_box(stbl_payload, *b"stsc");

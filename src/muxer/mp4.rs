@@ -4,7 +4,11 @@ use std::io::{self, Write};
 const SPS_NAL: &[u8] = &[0x67, 0x42, 0x00, 0x1e, 0xda, 0x02, 0x80, 0x2d, 0x8b, 0x11];
 const PPS_NAL: &[u8] = &[0x68, 0xce, 0x38, 0x80];
 
-pub const VIDEO_TIMESCALE: u32 = 1000;
+const MOVIE_TIMESCALE: u32 = 1000;
+/// Track/media timebase used for converting `pts` seconds into MP4 sample deltas.
+///
+/// v0.1.0 uses a 90 kHz media timescale (common for MP4/H.264 workflows).
+pub const MEDIA_TIMESCALE: u32 = 90_000;
 
 /// Minimal MP4 writer used by the early slices.
 pub struct Mp4Writer<Writer> {
@@ -502,7 +506,7 @@ fn build_audio_tkhd_box() -> Vec<u8> {
 }
 
 fn build_audio_mdia_box(audio: &Mp4AudioTrack, tables: &SampleTables) -> Vec<u8> {
-    let mdhd_box = build_mdhd_box_with_timescale(VIDEO_TIMESCALE);
+    let mdhd_box = build_mdhd_box_with_timescale(MEDIA_TIMESCALE);
     let hdlr_box = build_sound_hdlr_box();
     let minf_box = build_audio_minf_box(audio, tables);
 
@@ -836,7 +840,7 @@ fn build_url_box() -> Vec<u8> {
 }
 
 fn build_mdhd_box() -> Vec<u8> {
-    build_mdhd_box_with_timescale(VIDEO_TIMESCALE)
+    build_mdhd_box_with_timescale(MEDIA_TIMESCALE)
 }
 
 fn build_mdhd_box_with_timescale(timescale: u32) -> Vec<u8> {
@@ -932,7 +936,7 @@ fn build_mvhd_payload() -> Vec<u8> {
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
-    payload.extend_from_slice(&VIDEO_TIMESCALE.to_be_bytes());
+    payload.extend_from_slice(&MOVIE_TIMESCALE.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&0x0001_0000_u32.to_be_bytes());
     payload.extend_from_slice(&0x0100u16.to_be_bytes());

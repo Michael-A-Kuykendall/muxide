@@ -119,12 +119,12 @@ fn audio_samples_writes_second_track_and_tables() -> Result<(), Box<dyn std::err
     let a_entries = parse_boxes(&a_stsd_payload[8..]);
     assert_eq!(a_entries[0].typ, *b"mp4a");
 
-    // Audio stts: single entry with count=3, delta=21 (ms).
+    // Audio stts: single entry with count=3, delta=1890 (90kHz * 0.021s).
     let stts = find_box(a_stbl_payload, *b"stts");
     let stts_payload = stts.payload(a_stbl_payload);
     assert_eq!(be_u32(&stts_payload[4..8]), 1);
     assert_eq!(be_u32(&stts_payload[8..12]), 3);
-    assert_eq!(be_u32(&stts_payload[12..16]), 21);
+    assert_eq!(be_u32(&stts_payload[12..16]), 1890);
 
     // Audio stsz: 3 samples, each 2 bytes (ADTS headers stripped).
     let stsz = find_box(a_stbl_payload, *b"stsz");

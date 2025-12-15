@@ -5,7 +5,7 @@
 /// modules.  The API defined here intentionally exposes only the
 /// capabilities promised by the charter and contract documents.  It does
 /// not contain any implementation details.
-use crate::muxer::mp4::{Mp4AudioTrack, Mp4VideoTrack, Mp4Writer, Mp4WriterError, VIDEO_TIMESCALE};
+use crate::muxer::mp4::{Mp4AudioTrack, Mp4VideoTrack, Mp4Writer, Mp4WriterError, MEDIA_TIMESCALE};
 use std::fmt;
 use std::io::Write;
 
@@ -260,7 +260,7 @@ impl<Writer: Write> Muxer<Writer> {
         if pts < 0.0 {
             return Err(MuxerError::NegativeVideoPts);
         }
-        let scaled_pts = (pts * VIDEO_TIMESCALE as f64).round();
+        let scaled_pts = (pts * MEDIA_TIMESCALE as f64).round();
         let pts_units = scaled_pts as u64;
         if self.first_video_pts.is_none() {
             self.first_video_pts = Some(pts_units);
@@ -290,7 +290,7 @@ impl<Writer: Write> Muxer<Writer> {
             return Err(MuxerError::EmptyAudioFrame);
         }
 
-        let scaled_pts = (pts * VIDEO_TIMESCALE as f64).round();
+        let scaled_pts = (pts * MEDIA_TIMESCALE as f64).round();
         let pts_units = scaled_pts as u64;
 
         if let Some(prev) = self.last_audio_pts {
