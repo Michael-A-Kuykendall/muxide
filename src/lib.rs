@@ -52,3 +52,6 @@ pub mod api;
 
 // Fragmented MP4 support for streaming applications
 pub mod fragmented;
+
+// Codec configuration extraction (minimal bitstream parsing)
+pub mod codec;

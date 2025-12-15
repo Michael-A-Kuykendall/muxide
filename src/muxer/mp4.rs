@@ -2,9 +2,7 @@ use std::fmt;
 use std::io::{self, Write};
 
 use crate::api::Metadata;
-
-const DEFAULT_SPS_NAL: &[u8] = &[0x67, 0x42, 0x00, 0x1e, 0xda, 0x02, 0x80, 0x2d, 0x8b, 0x11];
-const DEFAULT_PPS_NAL: &[u8] = &[0x68, 0xce, 0x38, 0x80];
+use crate::codec::h264::{AvcConfig, extract_avc_config, default_avc_config, annexb_to_avcc};
 
 const MOVIE_TIMESCALE: u32 = 1000;
 /// Track/media timebase used for converting `pts` seconds into MP4 sample deltas.
@@ -25,12 +23,6 @@ pub struct Mp4Writer<Writer> {
     audio_last_delta: Option<u32>,
     finalized: bool,
     bytes_written: u64,
-}
-
-#[derive(Clone, Debug)]
-struct AvcConfig {
-    sps: Vec<u8>,
-    pps: Vec<u8>,
 }
 
 /// Simplified video track information used when writing the header.
@@ -260,7 +252,7 @@ impl<Writer: Write> Mp4Writer<Writer> {
             if !is_keyframe {
                 return Err(Mp4WriterError::FirstFrameMustBeKeyframe);
             }
-            let avc_config = extract_avc_config_from_keyframe(data);
+            let avc_config = extract_avc_config(data);
             if avc_config.is_none() {
                 return Err(Mp4WriterError::FirstFrameMissingSpsPps);
             }
@@ -614,62 +606,6 @@ enum TrackKind {
     Audio,
 }
 
-fn extract_avc_config_from_keyframe(data: &[u8]) -> Option<AvcConfig> {
-    let mut sps: Option<&[u8]> = None;
-    let mut pps: Option<&[u8]> = None;
-
-    for nal in annexb_iter_nals(data) {
-        if nal.is_empty() {
-            continue;
-        }
-        let nal_type = nal[0] & 0x1f;
-        if nal_type == 7 && sps.is_none() {
-            sps = Some(nal);
-        } else if nal_type == 8 && pps.is_none() {
-            pps = Some(nal);
-        }
-        if sps.is_some() && pps.is_some() {
-            break;
-        }
-    }
-
-    Some(AvcConfig {
-        sps: sps?.to_vec(),
-        pps: pps?.to_vec(),
-    })
-}
-
-fn default_avc_config() -> AvcConfig {
-    AvcConfig {
-        sps: DEFAULT_SPS_NAL.to_vec(),
-        pps: DEFAULT_PPS_NAL.to_vec(),
-    }
-}
-
-fn annexb_to_avcc(data: &[u8]) -> Vec<u8> {
-    let mut out = Vec::new();
-    for nal in annexb_iter_nals(data) {
-        if nal.is_empty() {
-            continue;
-        }
-        let len = nal.len() as u32;
-        out.extend_from_slice(&len.to_be_bytes());
-        out.extend_from_slice(nal);
-    }
-
-    if out.is_empty() {
-        let len = data.len() as u32;
-        out.extend_from_slice(&len.to_be_bytes());
-        out.extend_from_slice(data);
-    }
-
-    out
-}
-
-fn annexb_iter_nals(data: &[u8]) -> AnnexBNalIter<'_> {
-    AnnexBNalIter { data, cursor: 0 }
-}
-
 fn adts_to_raw(frame: &[u8]) -> Option<&[u8]> {
     if frame.len() < 7 {
         return None;
@@ -696,50 +632,6 @@ fn adts_to_raw(frame: &[u8]) -> Option<&[u8]> {
     }
 
     Some(&frame[header_len..aac_frame_length])
-}
-
-struct AnnexBNalIter<'a> {
-    data: &'a [u8],
-    cursor: usize,
-}
-
-impl<'a> Iterator for AnnexBNalIter<'a> {
-    type Item = &'a [u8];
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let (start_code_pos, start_code_len) = find_start_code(self.data, self.cursor)?;
-        let nal_start = start_code_pos + start_code_len;
-        let search_from = nal_start;
-        let nal_end = match find_start_code(self.data, search_from) {
-            Some((next_pos, _)) => next_pos,
-            None => self.data.len(),
-        };
-        self.cursor = nal_end;
-        Some(&self.data[nal_start..nal_end])
-    }
-}
-
-fn find_start_code(data: &[u8], from: usize) -> Option<(usize, usize)> {
-    if data.len() < 3 || from >= data.len() {
-        return None;
-    }
-
-    let mut i = from;
-    while i + 3 <= data.len() {
-        if i + 4 <= data.len()
-            && data[i] == 0
-            && data[i + 1] == 0
-            && data[i + 2] == 0
-            && data[i + 3] == 1
-        {
-            return Some((i, 4));
-        }
-        if data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 1 {
-            return Some((i, 3));
-        }
-        i += 1;
-    }
-    None
 }
 
 fn build_moov_box(
