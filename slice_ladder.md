@@ -172,7 +172,69 @@ This document enumerates the planned slices for the v0.1.0 release of **Muxide**
 
 ---
 
-## Slice 09 — Public Documentation & Examples
+## Slice 09 — CrabCamera Timebase (90 kHz) & Drift Control
+
+**Goal:** Align the muxer timing model with CrabCamera’s expected usage (`pts = frame_number / framerate`) by using a 90 kHz media timescale (common in MP4/H.264 workflows) and ensuring that timestamp conversion does not accumulate drift over long recordings.
+
+**Files touched:**
+- `muxide/src/muxer/mp4.rs`
+- `muxide/src/api.rs`
+- `muxide/tests/timebase.rs`
+
+**Inputs:** Existing Annex B fixtures (reused).
+
+**Outputs:** Video and audio sample tables (`stts`, `mdhd`) expressed in a 90 kHz timescale; long runs do not accumulate rounding drift for common frame rates.
+
+**Acceptance gate:**
+- Command: `cargo test --test timebase` passes.
+
+**Non‑goals:** B‑frame support; fragmented MP4; fast-start (`moov` at front).
+
+---
+
+## Slice 10 — Dynamic AVC Config (`avcC`) From Stream
+
+**Goal:** Populate `avcC` using SPS/PPS parsed from the first video keyframe (as provided by openh264 / CrabCamera) instead of any baked-in codec configuration. This improves real-world playback compatibility.
+
+**Files touched:**
+- `muxide/src/muxer/mp4.rs`
+- `muxide/tests/avcc_dynamic.rs`
+- `muxide/fixtures/` (new fixtures if needed)
+
+**Inputs:** Annex B fixtures containing SPS/PPS.
+
+**Outputs:** `avcC` reflects the actual bitstream SPS/PPS for the recording.
+
+**Acceptance gate:**
+- Command: `cargo test --test avcc_dynamic` passes.
+
+**Non‑goals:** Supporting mid-stream SPS/PPS changes; multiple parameter sets.
+
+---
+
+## Slice 11 — CrabCamera Convenience API & Stats
+
+**Goal:** Provide a CrabCamera-friendly constructor and finalisation stats without breaking the existing builder-based API.
+
+**Files touched:**
+- `muxide/src/api.rs`
+- `muxide/tests/stats.rs`
+- `muxide/docs/contract.md`
+
+**Inputs:** Existing fixtures (reused).
+
+**Outputs:**
+- A `MuxerConfig`/`MuxerStats` pair suitable for CrabCamera integration.
+- A convenience constructor (`Muxer::new(...)` or equivalent) and a stats-returning finish variant.
+
+**Acceptance gate:**
+- Command: `cargo test --test stats` passes.
+
+**Non‑goals:** Adding new codecs or container features.
+
+---
+
+## Slice 12 — Public Documentation & Examples
 
 **Goal:** Write crate‑level documentation and examples demonstrating how to use Muxide.  Include a tutorial that shows reading encoded frames from a file, muxing them into an MP4, and playing back the result.  Verify that examples compile with `cargo doc --document-private-items --no-deps`.
 
@@ -193,7 +255,7 @@ This document enumerates the planned slices for the v0.1.0 release of **Muxide**
 
 ---
 
-## Slice 10 — Release Preparation
+## Slice 13 — Release Preparation
 
 **Goal:** Prepare the crate for publication.  Audit the crate for unused code, ensure license headers are present, and bump the version to `0.1.0`.  Write a `CHANGELOG.md` summarising features.  Publish to crates.io (manual step beyond the scope of this agent).  Create Git tags and release notes.
 
@@ -214,4 +276,4 @@ This document enumerates the planned slices for the v0.1.0 release of **Muxide**
 
 ---
 
-Each slice after 10 is considered beyond the v0.1.0 scope and will be defined in a future slice ladder under a new charter.
+Each slice after 13 is considered beyond the v0.1.0 scope and will be defined in a future slice ladder under a new charter.

@@ -21,6 +21,13 @@ Muxide exposes a builder pattern for creating a `Muxer` instance that writes an 
 
 * `MuxerError` — Enumeration of error conditions that may be returned by builder or runtime operations.  This enum will grow as the implementation matures; clients should treat unknown variants exhaustively.
 
+### Timebase
+
+Muxide converts incoming timestamps in seconds (`pts: f64`) into a fixed internal media timebase.
+
+- The v0.1.0 implementation uses a **90 kHz** media timescale for track timing (a common convention for MP4/H.264).
+- The media timebase is shared between video and audio when both tracks are present.
+
 ### MuxerBuilder Methods
 
 * `new(writer: Writer) -> Self` — Constructs a builder for the given writer.  The writer is consumed by the builder and later moved into the `Muxer`.
@@ -50,6 +57,8 @@ Muxide exposes a builder pattern for creating a `Muxer` instance that writes an 
   - `data` must contain a complete encoded AAC frame (ADTS).  Empty frames cause an error.
 
 * `finish(self) -> Result<(), MuxerError>` — Finalises the container.  After calling this method, no further `write_*` calls may be made.  This method writes any pending metadata (e.g. `moov` box) to the output writer.  Errors returned at this stage indicate IO failures or internal state errors.  The writer is consumed by `finish`; if you need access to the inner writer, call `into_inner` instead (not available in v0.1.0).
+
+* `finish_in_place(&mut self) -> Result<(), MuxerError>` — Finalises the container without consuming the muxer.  This is a convenience for applications that want an explicit “finalised” error on double-finish and on writes after finishing.
 
 ### Error Semantics
 
