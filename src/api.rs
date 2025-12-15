@@ -159,11 +159,28 @@ pub enum MuxerError {
     MissingVideoConfig,
     /// Low-level IO error while writing the container.
     Io(std::io::Error),
-    /// Error returned from the MP4 writer while buffering samples.
-    Mp4Writer(Mp4WriterError),
-    /// Generic catch‑all error.  More specific variants will be added in
-    /// future slices.
-    Other(String),
+    /// The muxer has already been finished.
+    AlreadyFinished,
+    /// Video `pts` must be non-negative.
+    NegativeVideoPts,
+    /// Audio `pts` must be non-negative.
+    NegativeAudioPts,
+    /// Audio was written but no audio track was configured.
+    AudioNotConfigured,
+    /// Audio sample is empty.
+    EmptyAudioFrame,
+    /// Video timestamps must be strictly increasing.
+    NonIncreasingVideoPts,
+    /// Audio timestamps must be non-decreasing.
+    NonDecreasingAudioPts,
+    /// Audio may not precede the first video frame.
+    AudioBeforeFirstVideo,
+    /// The first video frame must be a keyframe.
+    FirstVideoFrameMustBeKeyframe,
+    /// The first video frame must include SPS/PPS.
+    FirstVideoFrameMissingSpsPps,
+    /// Audio sample is not a valid ADTS frame.
+    InvalidAdts,
 }
 
 impl From<std::io::Error> for MuxerError {
@@ -174,7 +191,18 @@ impl From<std::io::Error> for MuxerError {
 
 impl From<Mp4WriterError> for MuxerError {
     fn from(err: Mp4WriterError) -> Self {
-        MuxerError::Mp4Writer(err)
+        match err {
+            Mp4WriterError::NonIncreasingTimestamp => MuxerError::NonIncreasingVideoPts,
+            Mp4WriterError::FirstFrameMustBeKeyframe => MuxerError::FirstVideoFrameMustBeKeyframe,
+            Mp4WriterError::FirstFrameMissingSpsPps => MuxerError::FirstVideoFrameMissingSpsPps,
+            Mp4WriterError::InvalidAdts => MuxerError::InvalidAdts,
+            Mp4WriterError::AudioNotEnabled => MuxerError::AudioNotConfigured,
+            Mp4WriterError::DurationOverflow => MuxerError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "duration overflow",
+            )),
+            Mp4WriterError::AlreadyFinalized => MuxerError::AlreadyFinished,
+        }
     }
 }
 
@@ -183,8 +211,27 @@ impl fmt::Display for MuxerError {
         match self {
             MuxerError::MissingVideoConfig => write!(f, "missing video configuration"),
             MuxerError::Io(err) => write!(f, "io error: {}", err),
-            MuxerError::Mp4Writer(err) => write!(f, "mp4 writer error: {}", err),
-            MuxerError::Other(msg) => write!(f, "{}", msg),
+            MuxerError::AlreadyFinished => write!(f, "muxer already finished"),
+            MuxerError::NegativeVideoPts => write!(f, "video pts must be non-negative"),
+            MuxerError::NegativeAudioPts => write!(f, "audio pts must be non-negative"),
+            MuxerError::AudioNotConfigured => write!(f, "audio track not configured"),
+            MuxerError::EmptyAudioFrame => write!(f, "audio frame must be non-empty"),
+            MuxerError::NonIncreasingVideoPts => {
+                write!(f, "video pts must be strictly increasing")
+            }
+            MuxerError::NonDecreasingAudioPts => {
+                write!(f, "audio pts must be non-decreasing")
+            }
+            MuxerError::AudioBeforeFirstVideo => {
+                write!(f, "audio must not arrive before first video frame")
+            }
+            MuxerError::FirstVideoFrameMustBeKeyframe => {
+                write!(f, "first video frame must be a keyframe")
+            }
+            MuxerError::FirstVideoFrameMissingSpsPps => {
+                write!(f, "first video frame must contain SPS/PPS")
+            }
+            MuxerError::InvalidAdts => write!(f, "invalid ADTS frame"),
         }
     }
 }
@@ -208,10 +255,10 @@ impl<Writer: Write> Muxer<Writer> {
         is_keyframe: bool,
     ) -> Result<(), MuxerError> {
         if self.finished {
-            return Err(MuxerError::Other("muxer already finished".into()));
+            return Err(MuxerError::AlreadyFinished);
         }
         if pts < 0.0 {
-            return Err(MuxerError::Other("video pts must be non-negative".into()));
+            return Err(MuxerError::NegativeVideoPts);
         }
         let scaled_pts = (pts * VIDEO_TIMESCALE as f64).round();
         let pts_units = scaled_pts as u64;
@@ -231,16 +278,16 @@ impl<Writer: Write> Muxer<Writer> {
     /// present.
     pub fn write_audio(&mut self, pts: f64, data: &[u8]) -> Result<(), MuxerError> {
         if self.finished {
-            return Err(MuxerError::Other("muxer already finished".into()));
+            return Err(MuxerError::AlreadyFinished);
         }
         if self.audio_track.is_none() {
-            return Err(MuxerError::Other("audio track not configured".into()));
+            return Err(MuxerError::AudioNotConfigured);
         }
         if pts < 0.0 {
-            return Err(MuxerError::Other("audio pts must be non-negative".into()));
+            return Err(MuxerError::NegativeAudioPts);
         }
         if data.is_empty() {
-            return Err(MuxerError::Other("audio frame must be non-empty".into()));
+            return Err(MuxerError::EmptyAudioFrame);
         }
 
         let scaled_pts = (pts * VIDEO_TIMESCALE as f64).round();
@@ -248,22 +295,16 @@ impl<Writer: Write> Muxer<Writer> {
 
         if let Some(prev) = self.last_audio_pts {
             if pts_units < prev {
-                return Err(MuxerError::Other(
-                    "audio pts must be non-decreasing".into(),
-                ));
+                return Err(MuxerError::NonDecreasingAudioPts);
             }
         }
 
         if let Some(first_video) = self.first_video_pts {
             if pts_units < first_video {
-                return Err(MuxerError::Other(
-                    "audio pts must not precede first video pts".into(),
-                ));
+                return Err(MuxerError::AudioBeforeFirstVideo);
             }
         } else {
-            return Err(MuxerError::Other(
-                "audio must not arrive before first video frame".into(),
-            ));
+            return Err(MuxerError::AudioBeforeFirstVideo);
         }
 
         self.writer.write_audio_sample(pts_units, data)?;
@@ -277,7 +318,7 @@ impl<Writer: Write> Muxer<Writer> {
     /// in a minimal MP4 header that can be inspected by the slice 02 tests.
     pub fn finish_in_place(&mut self) -> Result<(), MuxerError> {
         if self.finished {
-            return Err(MuxerError::Other("muxer already finished".into()));
+            return Err(MuxerError::AlreadyFinished);
         }
         let params = Mp4VideoTrack {
             width: self.video_track.width,
