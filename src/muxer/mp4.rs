@@ -82,6 +82,8 @@ pub enum Mp4WriterError {
     NonIncreasingTimestamp,
     /// The first frame must be a keyframe containing SPS/PPS data.
     FirstFrameMustBeKeyframe,
+    /// The first keyframe must include SPS and PPS NAL units.
+    FirstFrameMissingSpsPps,
     /// Computed sample duration overflowed a `u32`.
     DurationOverflow,
 }
@@ -92,6 +94,9 @@ impl fmt::Display for Mp4WriterError {
             Mp4WriterError::NonIncreasingTimestamp => write!(f, "timestamps must grow"),
             Mp4WriterError::FirstFrameMustBeKeyframe => {
                 write!(f, "first frame must be a keyframe")
+            }
+            Mp4WriterError::FirstFrameMissingSpsPps => {
+                write!(f, "first frame must contain SPS/PPS")
             }
             Mp4WriterError::DurationOverflow => write!(f, "sample duration overflow"),
         }
@@ -132,11 +137,17 @@ impl<Writer: Write> Mp4Writer<Writer> {
                 last.duration = Some(delta);
             }
             self.last_delta = Some(delta);
-        } else if !is_keyframe {
-            return Err(Mp4WriterError::FirstFrameMustBeKeyframe);
+        } else {
+            if !is_keyframe {
+                return Err(Mp4WriterError::FirstFrameMustBeKeyframe);
+            }
+            if !annexb_contains_sps_pps(data) {
+                return Err(Mp4WriterError::FirstFrameMissingSpsPps);
+            }
         }
 
-        let sample_size = data.len();
+        let converted = annexb_to_avcc(data);
+        let sample_size = converted.len();
         if sample_size > u32::MAX as usize {
             return Err(Mp4WriterError::DurationOverflow);
         }
@@ -146,7 +157,7 @@ impl<Writer: Write> Mp4Writer<Writer> {
             is_keyframe,
             duration: None,
         });
-        self.sample_data.extend_from_slice(data);
+        self.sample_data.extend_from_slice(&converted);
         self.prev_pts = Some(pts);
         Ok(())
     }
@@ -171,6 +182,91 @@ impl<Writer: Write> Mp4Writer<Writer> {
         let moov_box = build_moov_box(video, &tables);
         self.writer.write_all(&moov_box)
     }
+}
+
+fn annexb_contains_sps_pps(data: &[u8]) -> bool {
+    let mut saw_sps = false;
+    let mut saw_pps = false;
+    for nal in annexb_iter_nals(data) {
+        if nal.is_empty() {
+            continue;
+        }
+        let nal_type = nal[0] & 0x1f;
+        if nal_type == 7 {
+            saw_sps = true;
+        } else if nal_type == 8 {
+            saw_pps = true;
+        }
+    }
+    saw_sps && saw_pps
+}
+
+fn annexb_to_avcc(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for nal in annexb_iter_nals(data) {
+        if nal.is_empty() {
+            continue;
+        }
+        let len = nal.len() as u32;
+        out.extend_from_slice(&len.to_be_bytes());
+        out.extend_from_slice(nal);
+    }
+
+    if out.is_empty() {
+        let len = data.len() as u32;
+        out.extend_from_slice(&len.to_be_bytes());
+        out.extend_from_slice(data);
+    }
+
+    out
+}
+
+fn annexb_iter_nals(mut data: &[u8]) -> AnnexBNalIter<'_> {
+    AnnexBNalIter { data, cursor: 0 }
+}
+
+struct AnnexBNalIter<'a> {
+    data: &'a [u8],
+    cursor: usize,
+}
+
+impl<'a> Iterator for AnnexBNalIter<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (start_code_pos, start_code_len) = find_start_code(self.data, self.cursor)?;
+        let nal_start = start_code_pos + start_code_len;
+        let search_from = nal_start;
+        let nal_end = match find_start_code(self.data, search_from) {
+            Some((next_pos, _)) => next_pos,
+            None => self.data.len(),
+        };
+        self.cursor = nal_end;
+        Some(&self.data[nal_start..nal_end])
+    }
+}
+
+fn find_start_code(data: &[u8], from: usize) -> Option<(usize, usize)> {
+    if data.len() < 3 || from >= data.len() {
+        return None;
+    }
+
+    let mut i = from;
+    while i + 3 <= data.len() {
+        if i + 4 <= data.len()
+            && data[i] == 0
+            && data[i + 1] == 0
+            && data[i + 2] == 0
+            && data[i + 3] == 1
+        {
+            return Some((i, 4));
+        }
+        if data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 1 {
+            return Some((i, 3));
+        }
+        i += 1;
+    }
+    None
 }
 
 fn build_moov_box(video: &Mp4VideoTrack, tables: &SampleTables) -> Vec<u8> {

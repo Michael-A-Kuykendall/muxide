@@ -188,6 +188,9 @@ impl<Writer: Write> Muxer<Writer> {
         data: &[u8],
         is_keyframe: bool,
     ) -> Result<(), MuxerError> {
+        if pts < 0.0 {
+            return Err(MuxerError::Other("video pts must be non-negative".into()));
+        }
         let scaled_pts = (pts * VIDEO_TIMESCALE as f64).round();
         let pts_units = scaled_pts as u64;
         self.writer
