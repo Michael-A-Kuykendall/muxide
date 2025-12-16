@@ -1,8 +1,9 @@
 use std::fmt;
 use std::io::{self, Write};
 
-use crate::api::Metadata;
+use crate::api::{Metadata, VideoCodec};
 use crate::codec::h264::{AvcConfig, extract_avc_config, default_avc_config, annexb_to_avcc};
+use crate::codec::h265::{HevcConfig, extract_hevc_config, hevc_annexb_to_hvcc};
 
 const MOVIE_TIMESCALE: u32 = 1000;
 /// Track/media timebase used for converting `pts` seconds into MP4 sample deltas.
@@ -10,13 +11,23 @@ const MOVIE_TIMESCALE: u32 = 1000;
 /// v0.1.0 uses a 90 kHz media timescale (common for MP4/H.264 workflows).
 pub const MEDIA_TIMESCALE: u32 = 90_000;
 
+/// Video codec configuration extracted from the first keyframe.
+#[derive(Clone, Debug)]
+pub enum VideoConfig {
+    /// H.264/AVC configuration (SPS + PPS)
+    Avc(AvcConfig),
+    /// H.265/HEVC configuration (VPS + SPS + PPS)
+    Hevc(HevcConfig),
+}
+
 /// Minimal MP4 writer used by the early slices.
 pub struct Mp4Writer<Writer> {
     writer: Writer,
+    video_codec: VideoCodec,
     video_samples: Vec<SampleInfo>,
     video_prev_pts: Option<u64>,
     video_last_delta: Option<u32>,
-    video_avc_config: Option<AvcConfig>,
+    video_config: Option<VideoConfig>,
     audio_track: Option<Mp4AudioTrack>,
     audio_samples: Vec<SampleInfo>,
     audio_prev_pts: Option<u64>,
@@ -156,13 +167,14 @@ impl std::error::Error for Mp4WriterError {}
 
 impl<Writer: Write> Mp4Writer<Writer> {
     /// Wraps the provided writer for MP4 container output.
-    pub fn new(writer: Writer) -> Self {
+    pub fn new(writer: Writer, video_codec: VideoCodec) -> Self {
         Self {
             writer,
+            video_codec,
             video_samples: Vec::new(),
             video_prev_pts: None,
             video_last_delta: None,
-            video_avc_config: None,
+            video_config: None,
             audio_track: None,
             audio_samples: Vec::new(),
             audio_prev_pts: None,
@@ -252,14 +264,26 @@ impl<Writer: Write> Mp4Writer<Writer> {
             if !is_keyframe {
                 return Err(Mp4WriterError::FirstFrameMustBeKeyframe);
             }
-            let avc_config = extract_avc_config(data);
-            if avc_config.is_none() {
+            // Extract codec configuration based on video codec type
+            let config = match self.video_codec {
+                VideoCodec::H264 => {
+                    extract_avc_config(data).map(VideoConfig::Avc)
+                }
+                VideoCodec::H265 => {
+                    extract_hevc_config(data).map(VideoConfig::Hevc)
+                }
+            };
+            if config.is_none() {
                 return Err(Mp4WriterError::FirstFrameMissingSpsPps);
             }
-            self.video_avc_config = avc_config;
+            self.video_config = config;
         }
 
-        let converted = annexb_to_avcc(data);
+        // Convert Annex B to length-prefixed format based on codec
+        let converted = match self.video_codec {
+            VideoCodec::H264 => annexb_to_avcc(data),
+            VideoCodec::H265 => hevc_annexb_to_hvcc(data),
+        };
         if converted.len() > u32::MAX as usize {
             return Err(Mp4WriterError::DurationOverflow);
         }
@@ -324,20 +348,30 @@ impl<Writer: Write> Mp4Writer<Writer> {
         }
         self.finalized = true;
 
-        let avc_config = self
-            .video_avc_config
+        let video_config = self
+            .video_config
             .clone()
-            .or_else(|| if self.video_samples.is_empty() { Some(default_avc_config()) } else { None })
-            .unwrap_or_else(default_avc_config);
+            .or_else(|| {
+                if self.video_samples.is_empty() {
+                    // Default config based on codec type
+                    match self.video_codec {
+                        VideoCodec::H264 => Some(VideoConfig::Avc(default_avc_config())),
+                        VideoCodec::H265 => None, // No default for HEVC, must have frames
+                    }
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| VideoConfig::Avc(default_avc_config()));
 
         if fast_start {
-            self.finalize_fast_start(video, metadata, &avc_config)
+            self.finalize_fast_start(video, metadata, &video_config)
         } else {
-            self.finalize_standard(video, metadata, &avc_config)
+            self.finalize_standard(video, metadata, &video_config)
         }
     }
 
-    fn finalize_standard(&mut self, video: &Mp4VideoTrack, metadata: Option<&Metadata>, avc_config: &AvcConfig) -> io::Result<()> {
+    fn finalize_standard(&mut self, video: &Mp4VideoTrack, metadata: Option<&Metadata>, video_config: &VideoConfig) -> io::Result<()> {
         let ftyp_box = build_ftyp_box();
         let ftyp_len = ftyp_box.len() as u32;
         Self::write_counted(&mut self.writer, &mut self.bytes_written, &ftyp_box)?;
@@ -373,7 +407,7 @@ impl<Writer: Write> Mp4Writer<Writer> {
                 samples_per_chunk,
                 self.video_last_delta,
             );
-            let moov_box = build_moov_box(video, &tables, None, avc_config, metadata);
+            let moov_box = build_moov_box(video, &tables, None, video_config, metadata);
             return Self::write_counted(&mut self.writer, &mut self.bytes_written, &moov_box);
         }
 
@@ -433,13 +467,13 @@ impl<Writer: Write> Mp4Writer<Writer> {
             video,
             &video_tables,
             Some((audio_track, &audio_tables)),
-            avc_config,
+            video_config,
             metadata,
         );
         Self::write_counted(&mut self.writer, &mut self.bytes_written, &moov_box)
     }
 
-    fn finalize_fast_start(&mut self, video: &Mp4VideoTrack, metadata: Option<&Metadata>, avc_config: &AvcConfig) -> io::Result<()> {
+    fn finalize_fast_start(&mut self, video: &Mp4VideoTrack, metadata: Option<&Metadata>, video_config: &VideoConfig) -> io::Result<()> {
         let ftyp_box = build_ftyp_box();
         let ftyp_len = ftyp_box.len() as u32;
 
@@ -501,9 +535,9 @@ impl<Writer: Write> Mp4Writer<Writer> {
 
         let placeholder_moov = if let Some(ref audio_tables) = placeholder_audio_tables {
             let audio_track = self.audio_track.as_ref().unwrap();
-            build_moov_box(video, &placeholder_video_tables, Some((audio_track, audio_tables)), avc_config, metadata)
+            build_moov_box(video, &placeholder_video_tables, Some((audio_track, audio_tables)), video_config, metadata)
         } else {
-            build_moov_box(video, &placeholder_video_tables, None, avc_config, metadata)
+            build_moov_box(video, &placeholder_video_tables, None, video_config, metadata)
         };
         let moov_len = placeholder_moov.len() as u32;
 
@@ -548,9 +582,9 @@ impl<Writer: Write> Mp4Writer<Writer> {
 
         let final_moov = if let Some(ref audio_tables) = final_audio_tables {
             let audio_track = self.audio_track.as_ref().unwrap();
-            build_moov_box(video, &final_video_tables, Some((audio_track, audio_tables)), avc_config, metadata)
+            build_moov_box(video, &final_video_tables, Some((audio_track, audio_tables)), video_config, metadata)
         } else {
-            build_moov_box(video, &final_video_tables, None, avc_config, metadata)
+            build_moov_box(video, &final_video_tables, None, video_config, metadata)
         };
 
         // Write: ftyp → moov → mdat header → samples
@@ -638,12 +672,12 @@ fn build_moov_box(
     video: &Mp4VideoTrack,
     video_tables: &SampleTables,
     audio: Option<(&Mp4AudioTrack, &SampleTables)>,
-    avc_config: &AvcConfig,
+    video_config: &VideoConfig,
     metadata: Option<&Metadata>,
 ) -> Vec<u8> {
     let mvhd_payload = build_mvhd_payload();
     let mvhd_box = build_box(b"mvhd", &mvhd_payload);
-    let trak_box = build_trak_box(video, video_tables, avc_config);
+    let trak_box = build_trak_box(video, video_tables, video_config);
 
     let mut payload = Vec::new();
     payload.extend_from_slice(&mvhd_box);
@@ -809,9 +843,9 @@ fn build_audio_specific_config(sample_rate: u32, channels: u16) -> [u8; 2] {
     [byte0, byte1]
 }
 
-fn build_trak_box(video: &Mp4VideoTrack, tables: &SampleTables, avc_config: &AvcConfig) -> Vec<u8> {
+fn build_trak_box(video: &Mp4VideoTrack, tables: &SampleTables, video_config: &VideoConfig) -> Vec<u8> {
     let tkhd_box = build_tkhd_box(video);
-    let mdia_box = build_mdia_box(video, tables, avc_config);
+    let mdia_box = build_mdia_box(video, tables, video_config);
 
     let mut payload = Vec::new();
     payload.extend_from_slice(&tkhd_box);
@@ -819,10 +853,10 @@ fn build_trak_box(video: &Mp4VideoTrack, tables: &SampleTables, avc_config: &Avc
     build_box(b"trak", &payload)
 }
 
-fn build_mdia_box(video: &Mp4VideoTrack, tables: &SampleTables, avc_config: &AvcConfig) -> Vec<u8> {
+fn build_mdia_box(video: &Mp4VideoTrack, tables: &SampleTables, video_config: &VideoConfig) -> Vec<u8> {
     let mdhd_box = build_mdhd_box();
     let hdlr_box = build_hdlr_box();
-    let minf_box = build_minf_box(video, tables, avc_config);
+    let minf_box = build_minf_box(video, tables, video_config);
 
     let mut payload = Vec::new();
     payload.extend_from_slice(&mdhd_box);
@@ -831,10 +865,10 @@ fn build_mdia_box(video: &Mp4VideoTrack, tables: &SampleTables, avc_config: &Avc
     build_box(b"mdia", &payload)
 }
 
-fn build_minf_box(video: &Mp4VideoTrack, tables: &SampleTables, avc_config: &AvcConfig) -> Vec<u8> {
+fn build_minf_box(video: &Mp4VideoTrack, tables: &SampleTables, video_config: &VideoConfig) -> Vec<u8> {
     let vmhd_box = build_vmhd_box();
     let dinf_box = build_dinf_box();
-    let stbl_box = build_stbl_box(video, tables, avc_config);
+    let stbl_box = build_stbl_box(video, tables, video_config);
 
     let mut payload = Vec::new();
     payload.extend_from_slice(&vmhd_box);
@@ -843,8 +877,8 @@ fn build_minf_box(video: &Mp4VideoTrack, tables: &SampleTables, avc_config: &Avc
     build_box(b"minf", &payload)
 }
 
-fn build_stbl_box(video: &Mp4VideoTrack, tables: &SampleTables, avc_config: &AvcConfig) -> Vec<u8> {
-    let stsd_box = build_stsd_box(video, avc_config);
+fn build_stbl_box(video: &Mp4VideoTrack, tables: &SampleTables, video_config: &VideoConfig) -> Vec<u8> {
+    let stsd_box = build_stsd_box(video, video_config);
     let stts_box = build_stts_box(&tables.durations);
     let stsc_box = build_stsc_box(tables.samples_per_chunk, tables.chunk_offsets.len() as u32);
     let stsz_box = build_stsz_box(&tables.sizes);
@@ -868,13 +902,16 @@ fn build_stbl_box(video: &Mp4VideoTrack, tables: &SampleTables, avc_config: &Avc
     build_box(b"stbl", &payload)
 }
 
-fn build_stsd_box(video: &Mp4VideoTrack, avc_config: &AvcConfig) -> Vec<u8> {
-    let avc1_box = build_avc1_box(video, avc_config);
+fn build_stsd_box(video: &Mp4VideoTrack, video_config: &VideoConfig) -> Vec<u8> {
+    let sample_entry = match video_config {
+        VideoConfig::Avc(avc_config) => build_avc1_box(video, avc_config),
+        VideoConfig::Hevc(hevc_config) => build_hvc1_box(video, hevc_config),
+    };
 
     let mut payload = Vec::new();
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&1u32.to_be_bytes());
-    payload.extend_from_slice(&avc1_box);
+    payload.extend_from_slice(&sample_entry);
     build_box(b"stsd", &payload)
 }
 
@@ -1018,6 +1055,116 @@ fn build_avcc_box(avc_config: &AvcConfig) -> Vec<u8> {
     payload.extend_from_slice(&(avc_config.pps.len() as u16).to_be_bytes());
     payload.extend_from_slice(&avc_config.pps);
     build_box(b"avcC", &payload)
+}
+
+/// Build an hvc1 sample entry box for HEVC video.
+fn build_hvc1_box(video: &Mp4VideoTrack, hevc_config: &HevcConfig) -> Vec<u8> {
+    let mut payload = Vec::new();
+    // Reserved (6 bytes)
+    payload.extend_from_slice(&[0u8; 6]);
+    // Data reference index
+    payload.extend_from_slice(&1u16.to_be_bytes());
+    // Pre-defined + reserved
+    payload.extend_from_slice(&0u16.to_be_bytes());
+    payload.extend_from_slice(&0u16.to_be_bytes());
+    payload.extend_from_slice(&0u32.to_be_bytes());
+    payload.extend_from_slice(&0u32.to_be_bytes());
+    payload.extend_from_slice(&0u32.to_be_bytes());
+    // Width and height
+    payload.extend_from_slice(&video.width.to_be_bytes());
+    payload.extend_from_slice(&video.height.to_be_bytes());
+    // Horizontal/vertical resolution (72 dpi fixed point)
+    payload.extend_from_slice(&0x0048_0000_u32.to_be_bytes());
+    payload.extend_from_slice(&0x0048_0000_u32.to_be_bytes());
+    // Reserved
+    payload.extend_from_slice(&0u32.to_be_bytes());
+    // Frame count
+    payload.extend_from_slice(&1u16.to_be_bytes());
+    // Compressor name (32 bytes, empty)
+    payload.extend_from_slice(&[0u8; 32]);
+    // Depth
+    payload.extend_from_slice(&0x0018u16.to_be_bytes());
+    // Pre-defined
+    payload.extend_from_slice(&0xffffu16.to_be_bytes());
+    // hvcC box
+    let hvcc_box = build_hvcc_box(hevc_config);
+    payload.extend_from_slice(&hvcc_box);
+    build_box(b"hvc1", &payload)
+}
+
+/// Build an hvcC configuration box for HEVC.
+fn build_hvcc_box(hevc_config: &HevcConfig) -> Vec<u8> {
+    let mut payload = Vec::new();
+
+    // Extract profile/tier/level from SPS
+    let general_profile_space = hevc_config.general_profile_space();
+    let general_tier_flag = hevc_config.general_tier_flag();
+    let general_profile_idc = hevc_config.general_profile_idc();
+    let general_level_idc = hevc_config.general_level_idc();
+
+    // configurationVersion = 1
+    payload.push(1);
+    
+    // general_profile_space (2) + general_tier_flag (1) + general_profile_idc (5)
+    let byte1 = (general_profile_space << 6) 
+              | (if general_tier_flag { 0x20 } else { 0 })
+              | (general_profile_idc & 0x1f);
+    payload.push(byte1);
+    
+    // general_profile_compatibility_flags (4 bytes)
+    // For simplicity, set Main profile compatibility (bit 1)
+    payload.extend_from_slice(&[0x60, 0x00, 0x00, 0x00]);
+    
+    // general_constraint_indicator_flags (6 bytes)
+    payload.extend_from_slice(&[0x90, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    
+    // general_level_idc
+    payload.push(general_level_idc);
+    
+    // min_spatial_segmentation_idc (12 bits) with reserved (4 bits)
+    payload.extend_from_slice(&[0xf0, 0x00]);
+    
+    // parallelismType (2 bits) with reserved (6 bits)
+    payload.push(0xfc);
+    
+    // chromaFormat (2 bits) with reserved (6 bits) - assume 4:2:0
+    payload.push(0xfd);
+    
+    // bitDepthLumaMinus8 (3 bits) with reserved (5 bits) - assume 8-bit
+    payload.push(0xf8);
+    
+    // bitDepthChromaMinus8 (3 bits) with reserved (5 bits) - assume 8-bit
+    payload.push(0xf8);
+    
+    // avgFrameRate (16 bits) - 0 = unspecified
+    payload.extend_from_slice(&0u16.to_be_bytes());
+    
+    // constantFrameRate (2) + numTemporalLayers (3) + temporalIdNested (1) + lengthSizeMinusOne (2)
+    // lengthSizeMinusOne = 3 (4-byte NAL length)
+    payload.push(0x03);
+    
+    // numOfArrays = 3 (VPS, SPS, PPS)
+    payload.push(3);
+    
+    // VPS array
+    payload.push(0x20 | 32); // array_completeness=1 + nal_unit_type=32 (VPS)
+    payload.extend_from_slice(&1u16.to_be_bytes()); // numNalus = 1
+    payload.extend_from_slice(&(hevc_config.vps.len() as u16).to_be_bytes());
+    payload.extend_from_slice(&hevc_config.vps);
+    
+    // SPS array
+    payload.push(0x20 | 33); // array_completeness=1 + nal_unit_type=33 (SPS)
+    payload.extend_from_slice(&1u16.to_be_bytes()); // numNalus = 1
+    payload.extend_from_slice(&(hevc_config.sps.len() as u16).to_be_bytes());
+    payload.extend_from_slice(&hevc_config.sps);
+    
+    // PPS array
+    payload.push(0x20 | 34); // array_completeness=1 + nal_unit_type=34 (PPS)
+    payload.extend_from_slice(&1u16.to_be_bytes()); // numNalus = 1
+    payload.extend_from_slice(&(hevc_config.pps.len() as u16).to_be_bytes());
+    payload.extend_from_slice(&hevc_config.pps);
+    
+    build_box(b"hvcC", &payload)
 }
 
 fn build_vmhd_box() -> Vec<u8> {

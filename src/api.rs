@@ -15,6 +15,9 @@ pub enum VideoCodec {
     /// H.264/AVC video codec.  Only the AVC Annex B stream format is
     /// currently supported.  B‑frames are not permitted in v0.
     H264,
+    /// H.265/HEVC video codec. Annex B stream format with VPS/SPS/PPS.
+    /// Requires first keyframe to contain VPS, SPS, and PPS NALs.
+    H265,
 }
 
 /// Enumeration of supported audio codecs for the initial version.
@@ -206,7 +209,7 @@ impl<Writer> MuxerBuilder<Writer> {
             }
         });
 
-        let mut writer = Mp4Writer::new(self.writer);
+        let mut writer = Mp4Writer::new(self.writer, video_track.codec);
         if let Some(audio) = &audio_track {
             writer.enable_audio(Mp4AudioTrack {
                 sample_rate: audio.sample_rate,
