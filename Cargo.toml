@@ -2,15 +2,20 @@
 name = "muxide"
 version = "0.1.0"
 edition = "2021"
-description = "Recording-oriented MP4 muxer for H.264 (optional AAC)"
+rust-version = "1.70"
+description = "Zero-dependency pure-Rust MP4 muxer for recording applications"
+authors = ["Michael A. Kuykendall <michaelallenkuykendall@gmail.com>"]
 readme = "README.md"
 repository = "https://github.com/Michael-A-Kuykendall/muxide"
+homepage = "https://github.com/Michael-A-Kuykendall/muxide"
+documentation = "https://docs.rs/muxide"
 license = "MIT OR Apache-2.0"
 keywords = ["mp4", "isobmff", "h264", "mux", "recording"]
 categories = ["multimedia", "encoding"]
+exclude = [".github/", ".vscode/", "target/"]
 
 [dependencies]
-lazy_static = "1.4"
 
 [dev-dependencies]
+lazy_static = "1.4"
 proptest = "1.4"

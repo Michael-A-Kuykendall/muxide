@@ -24,11 +24,11 @@
 //! ```
 
 use std::collections::HashSet;
-use std::sync::RwLock;
+use std::sync::{OnceLock, RwLock};
 
-lazy_static::lazy_static! {
-    /// Global registry of checked invariants
-    static ref INVARIANT_LOG: RwLock<HashSet<String>> = RwLock::new(HashSet::new());
+fn invariant_log() -> &'static RwLock<HashSet<String>> {
+    static INVARIANT_LOG: OnceLock<RwLock<HashSet<String>>> = OnceLock::new();
+    INVARIANT_LOG.get_or_init(|| RwLock::new(HashSet::new()))
 }
 
 /// Assert an invariant and log it for contract testing.
@@ -54,7 +54,7 @@ macro_rules! assert_invariant {
 #[doc(hidden)]
 pub fn __assert_invariant_impl(condition: bool, message: &str, context: Option<&str>) {
     // Log that this invariant was checked (ignore poisoned lock)
-    if let Ok(mut log) = INVARIANT_LOG.write() {
+    if let Ok(mut log) = invariant_log().write() {
         log.insert(message.to_string());
     }
 
@@ -73,7 +73,7 @@ pub fn __assert_invariant_impl(condition: bool, message: &str, context: Option<&
 /// # Panics
 /// Panics if any required invariant was not checked.
 pub fn contract_test(test_name: &str, required_invariants: &[&str]) {
-    let log = match INVARIANT_LOG.read() {
+    let log = match invariant_log().read() {
         Ok(l) => l,
         Err(poisoned) => poisoned.into_inner(),
     };
@@ -96,14 +96,14 @@ pub fn contract_test(test_name: &str, required_invariants: &[&str]) {
 
 /// Clear the invariant log (call between test runs if needed)
 pub fn clear_invariant_log() {
-    if let Ok(mut log) = INVARIANT_LOG.write() {
+    if let Ok(mut log) = invariant_log().write() {
         log.clear();
     }
 }
 
 /// Get a snapshot of currently logged invariants (for debugging)
 pub fn get_logged_invariants() -> Vec<String> {
-    match INVARIANT_LOG.read() {
+    match invariant_log().read() {
         Ok(log) => log.iter().cloned().collect(),
         Err(poisoned) => poisoned.into_inner().iter().cloned().collect(),
     }

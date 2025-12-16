@@ -5,6 +5,8 @@
 [![Crates.io](https://img.shields.io/crates/v/muxide.svg)](https://crates.io/crates/muxide)
 [![Documentation](https://docs.rs/muxide/badge.svg)](https://docs.rs/muxide)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
+[![MSRV](https://img.shields.io/badge/MSRV-1.70-blue.svg)](https://www.rust-lang.org)
+[![CI](https://github.com/Michael-A-Kuykendall/muxide/actions/workflows/ci.yml/badge.svg)](https://github.com/Michael-A-Kuykendall/muxide/actions)
 
 > **Muxide guarantees that any correctly-timestamped, already-encoded audio/video stream can be turned into a standards-compliant, immediately-playable MP4 without external tooling.**
 
