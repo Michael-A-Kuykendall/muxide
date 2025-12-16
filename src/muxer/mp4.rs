@@ -4,6 +4,7 @@ use std::io::{self, Write};
 use crate::api::{AudioCodec, Metadata, VideoCodec};
 use crate::codec::h264::{AvcConfig, extract_avc_config, default_avc_config, annexb_to_avcc};
 use crate::codec::h265::{HevcConfig, extract_hevc_config, hevc_annexb_to_hvcc};
+use crate::codec::av1::{Av1Config, extract_av1_config};
 use crate::codec::opus::{OpusConfig, is_valid_opus_packet, OPUS_SAMPLE_RATE};
 
 const MOVIE_TIMESCALE: u32 = 1000;
@@ -19,6 +20,8 @@ pub enum VideoConfig {
     Avc(AvcConfig),
     /// H.265/HEVC configuration (VPS + SPS + PPS)
     Hevc(HevcConfig),
+    /// AV1 configuration (Sequence Header OBU)
+    Av1(Av1Config),
 }
 
 /// Minimal MP4 writer used by the early slices.
@@ -137,6 +140,8 @@ pub enum Mp4WriterError {
     FirstFrameMustBeKeyframe,
     /// The first keyframe must include SPS and PPS NAL units.
     FirstFrameMissingSpsPps,
+    /// The first AV1 keyframe must include a Sequence Header OBU.
+    FirstFrameMissingSequenceHeader,
     /// Audio sample is not a valid ADTS frame.
     InvalidAdts,
     /// Audio sample is not a valid Opus packet.
@@ -158,6 +163,9 @@ impl fmt::Display for Mp4WriterError {
             }
             Mp4WriterError::FirstFrameMissingSpsPps => {
                 write!(f, "first frame must contain SPS/PPS")
+            }
+            Mp4WriterError::FirstFrameMissingSequenceHeader => {
+                write!(f, "first AV1 frame must contain Sequence Header OBU")
             }
             Mp4WriterError::InvalidAdts => write!(f, "invalid ADTS frame"),
             Mp4WriterError::InvalidOpusPacket => write!(f, "invalid Opus packet"),
@@ -277,17 +285,25 @@ impl<Writer: Write> Mp4Writer<Writer> {
                 VideoCodec::H265 => {
                     extract_hevc_config(data).map(VideoConfig::Hevc)
                 }
+                VideoCodec::Av1 => {
+                    extract_av1_config(data).map(VideoConfig::Av1)
+                }
             };
             if config.is_none() {
-                return Err(Mp4WriterError::FirstFrameMissingSpsPps);
+                return Err(match self.video_codec {
+                    VideoCodec::Av1 => Mp4WriterError::FirstFrameMissingSequenceHeader,
+                    _ => Mp4WriterError::FirstFrameMissingSpsPps,
+                });
             }
             self.video_config = config;
         }
 
         // Convert Annex B to length-prefixed format based on codec
+        // AV1 uses OBU format which doesn't need conversion
         let converted = match self.video_codec {
             VideoCodec::H264 => annexb_to_avcc(data),
             VideoCodec::H265 => hevc_annexb_to_hvcc(data),
+            VideoCodec::Av1 => data.to_vec(),  // AV1 OBUs passed as-is
         };
         if converted.len() > u32::MAX as usize {
             return Err(Mp4WriterError::DurationOverflow);
@@ -378,6 +394,7 @@ impl<Writer: Write> Mp4Writer<Writer> {
                     match self.video_codec {
                         VideoCodec::H264 => Some(VideoConfig::Avc(default_avc_config())),
                         VideoCodec::H265 => None, // No default for HEVC, must have frames
+                        VideoCodec::Av1 => None, // No default for AV1, must have frames
                     }
                 } else {
                     None
@@ -1008,6 +1025,7 @@ fn build_stsd_box(video: &Mp4VideoTrack, video_config: &VideoConfig) -> Vec<u8> 
     let sample_entry = match video_config {
         VideoConfig::Avc(avc_config) => build_avc1_box(video, avc_config),
         VideoConfig::Hevc(hevc_config) => build_hvc1_box(video, hevc_config),
+        VideoConfig::Av1(av1_config) => build_av01_box(video, av1_config),
     };
 
     let mut payload = Vec::new();
@@ -1267,6 +1285,76 @@ fn build_hvcc_box(hevc_config: &HevcConfig) -> Vec<u8> {
     payload.extend_from_slice(&hevc_config.pps);
     
     build_box(b"hvcC", &payload)
+}
+
+/// Build an av01 sample entry box for AV1 video.
+fn build_av01_box(video: &Mp4VideoTrack, av1_config: &Av1Config) -> Vec<u8> {
+    let mut payload = Vec::new();
+    // Reserved (6 bytes)
+    payload.extend_from_slice(&[0u8; 6]);
+    // Data reference index
+    payload.extend_from_slice(&1u16.to_be_bytes());
+    // Pre-defined + reserved
+    payload.extend_from_slice(&0u16.to_be_bytes());
+    payload.extend_from_slice(&0u16.to_be_bytes());
+    payload.extend_from_slice(&0u32.to_be_bytes());
+    payload.extend_from_slice(&0u32.to_be_bytes());
+    payload.extend_from_slice(&0u32.to_be_bytes());
+    // Width and height
+    payload.extend_from_slice(&video.width.to_be_bytes());
+    payload.extend_from_slice(&video.height.to_be_bytes());
+    // Horizontal/vertical resolution (72 dpi fixed point)
+    payload.extend_from_slice(&0x0048_0000_u32.to_be_bytes());
+    payload.extend_from_slice(&0x0048_0000_u32.to_be_bytes());
+    // Reserved
+    payload.extend_from_slice(&0u32.to_be_bytes());
+    // Frame count
+    payload.extend_from_slice(&1u16.to_be_bytes());
+    // Compressor name (32 bytes, empty)
+    payload.extend_from_slice(&[0u8; 32]);
+    // Depth (24-bit)
+    payload.extend_from_slice(&0x0018u16.to_be_bytes());
+    // Pre-defined (-1)
+    payload.extend_from_slice(&0xffffu16.to_be_bytes());
+    // av1C box
+    let av1c_box = build_av1c_box(av1_config);
+    payload.extend_from_slice(&av1c_box);
+    build_box(b"av01", &payload)
+}
+
+/// Build an av1C configuration box for AV1.
+///
+/// ISO/IEC 14496-12:2022 and AV1 Codec ISO Media File Format Binding spec.
+fn build_av1c_box(av1_config: &Av1Config) -> Vec<u8> {
+    let mut payload = Vec::new();
+
+    // Byte 0: marker (1) + version (7) = 0x81
+    payload.push(0x81);
+    
+    // Byte 1: seq_profile (3) + seq_level_idx_0 (5)
+    let byte1 = ((av1_config.seq_profile & 0x07) << 5) 
+              | (av1_config.seq_level_idx & 0x1f);
+    payload.push(byte1);
+    
+    // Byte 2: seq_tier_0 (1) + high_bitdepth (1) + twelve_bit (1) + monochrome (1) 
+    //       + chroma_subsampling_x (1) + chroma_subsampling_y (1) + chroma_sample_position (2)
+    let byte2 = ((av1_config.seq_tier & 0x01) << 7)
+              | (if av1_config.high_bitdepth { 0x40 } else { 0 })
+              | (if av1_config.twelve_bit { 0x20 } else { 0 })
+              | (if av1_config.monochrome { 0x10 } else { 0 })
+              | (if av1_config.chroma_subsampling_x { 0x08 } else { 0 })
+              | (if av1_config.chroma_subsampling_y { 0x04 } else { 0 })
+              | (av1_config.chroma_sample_position & 0x03);
+    payload.push(byte2);
+    
+    // Byte 3: reserved (1) + initial_presentation_delay_present (1) + reserved (4) OR initial_presentation_delay_minus_one (4)
+    // Set to 0 (no initial presentation delay)
+    payload.push(0x00);
+    
+    // configOBUs: Append the Sequence Header OBU
+    payload.extend_from_slice(&av1_config.sequence_header);
+    
+    build_box(b"av1C", &payload)
 }
 
 fn build_vmhd_box() -> Vec<u8> {

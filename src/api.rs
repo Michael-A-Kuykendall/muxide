@@ -18,6 +18,9 @@ pub enum VideoCodec {
     /// H.265/HEVC video codec. Annex B stream format with VPS/SPS/PPS.
     /// Requires first keyframe to contain VPS, SPS, and PPS NALs.
     H265,
+    /// AV1 video codec. OBU (Open Bitstream Unit) stream format.
+    /// Requires first keyframe to contain Sequence Header OBU.
+    Av1,
 }
 
 /// Enumeration of supported audio codecs for the initial version.
@@ -327,8 +330,10 @@ pub enum MuxerError {
     },
     /// The first video frame must be a keyframe.
     FirstVideoFrameMustBeKeyframe,
-    /// The first video frame must include SPS/PPS.
+    /// The first video frame must include SPS/PPS (H.264/H.265).
     FirstVideoFrameMissingSpsPps,
+    /// The first AV1 keyframe must include a Sequence Header OBU.
+    FirstAv1FrameMissingSequenceHeader,
     /// Audio sample is not a valid ADTS frame.
     InvalidAdts {
         frame_index: u64,
@@ -401,6 +406,10 @@ impl fmt::Display for MuxerError {
             MuxerError::FirstVideoFrameMissingSpsPps => {
                 write!(f, "first video frame must contain SPS and PPS NAL units: \
                           prepend SPS (NAL type 7) and PPS (NAL type 8) to the first keyframe")
+            }
+            MuxerError::FirstAv1FrameMissingSequenceHeader => {
+                write!(f, "first AV1 frame must contain a Sequence Header OBU: \
+                          ensure the first keyframe includes OBU type 1 (SEQUENCE_HEADER)")
             }
             MuxerError::InvalidAdts { frame_index } => {
                 write!(f, "audio frame {} is not valid ADTS: ensure the frame starts with 0xFFF sync word",
@@ -573,6 +582,7 @@ impl<Writer: Write> Muxer<Writer> {
             },
             Mp4WriterError::FirstFrameMustBeKeyframe => MuxerError::FirstVideoFrameMustBeKeyframe,
             Mp4WriterError::FirstFrameMissingSpsPps => MuxerError::FirstVideoFrameMissingSpsPps,
+            Mp4WriterError::FirstFrameMissingSequenceHeader => MuxerError::FirstAv1FrameMissingSequenceHeader,
             Mp4WriterError::InvalidAdts => MuxerError::InvalidAdts { frame_index },
             Mp4WriterError::InvalidOpusPacket => MuxerError::InvalidOpusPacket { frame_index },
             Mp4WriterError::AudioNotEnabled => MuxerError::AudioNotConfigured,
