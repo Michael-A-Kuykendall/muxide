@@ -1,12 +1,12 @@
-# Muxide
-
-**Zero-dependency pure-Rust MP4 muxer for recording applications.**
-
-[![Crates.io](https://img.shields.io/crates/v/muxide.svg)](https://crates.io/crates/muxide)
-[![Documentation](https://docs.rs/muxide/badge.svg)](https://docs.rs/muxide)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
-[![MSRV](https://img.shields.io/badge/MSRV-1.70-blue.svg)](https://www.rust-lang.org)
-[![CI](https://github.com/Michael-A-Kuykendall/muxide/actions/workflows/ci.yml/badge.svg)](https://github.com/Michael-A-Kuykendall/muxide/actions)
+<p align="center">
+  <img src="muxide-logo.png" alt="Muxide" width="350"><br>
+  <em>Zero-dependency pure-Rust MP4 muxer for recording applications.</em><br>
+  <a href="https://crates.io/crates/muxide"><img src="https://img.shields.io/crates/v/muxide.svg" alt="Crates.io"></a>
+  <a href="https://docs.rs/muxide"><img src="https://docs.rs/muxide/badge.svg" alt="Documentation"></a>
+  <a href="LICENSE-MIT"><img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg" alt="License"></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/MSRV-1.70-blue.svg" alt="MSRV"></a>
+  <a href="https://github.com/Michael-A-Kuykendall/muxide/actions"><img src="https://github.com/Michael-A-Kuykendall/muxide/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+</p>
 
 > **Muxide guarantees that any correctly-timestamped, already-encoded audio/video stream can be turned into a standards-compliant, immediately-playable MP4 without external tooling.**
 
