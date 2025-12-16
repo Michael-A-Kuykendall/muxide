@@ -1,9 +1,10 @@
 use std::fmt;
 use std::io::{self, Write};
 
-use crate::api::{Metadata, VideoCodec};
+use crate::api::{AudioCodec, Metadata, VideoCodec};
 use crate::codec::h264::{AvcConfig, extract_avc_config, default_avc_config, annexb_to_avcc};
 use crate::codec::h265::{HevcConfig, extract_hevc_config, hevc_annexb_to_hvcc};
+use crate::codec::opus::{OpusConfig, is_valid_opus_packet, OPUS_SAMPLE_RATE};
 
 const MOVIE_TIMESCALE: u32 = 1000;
 /// Track/media timebase used for converting `pts` seconds into MP4 sample deltas.
@@ -45,6 +46,7 @@ pub struct Mp4VideoTrack {
 pub struct Mp4AudioTrack {
     pub sample_rate: u32,
     pub channels: u16,
+    pub codec: AudioCodec,
 }
 
 struct SampleInfo {
@@ -137,6 +139,8 @@ pub enum Mp4WriterError {
     FirstFrameMissingSpsPps,
     /// Audio sample is not a valid ADTS frame.
     InvalidAdts,
+    /// Audio sample is not a valid Opus packet.
+    InvalidOpusPacket,
     /// Audio track is not enabled on this writer.
     AudioNotEnabled,
     /// Computed sample duration overflowed a `u32`.
@@ -156,6 +160,7 @@ impl fmt::Display for Mp4WriterError {
                 write!(f, "first frame must contain SPS/PPS")
             }
             Mp4WriterError::InvalidAdts => write!(f, "invalid ADTS frame"),
+            Mp4WriterError::InvalidOpusPacket => write!(f, "invalid Opus packet"),
             Mp4WriterError::AudioNotEnabled => write!(f, "audio track not enabled"),
             Mp4WriterError::DurationOverflow => write!(f, "sample duration overflow"),
             Mp4WriterError::AlreadyFinalized => write!(f, "writer already finalised"),
@@ -303,9 +308,7 @@ impl<Writer: Write> Mp4Writer<Writer> {
         if self.finalized {
             return Err(Mp4WriterError::AlreadyFinalized);
         }
-        if self.audio_track.is_none() {
-            return Err(Mp4WriterError::AudioNotEnabled);
-        }
+        let audio_track = self.audio_track.as_ref().ok_or(Mp4WriterError::AudioNotEnabled)?;
 
         if let Some(prev) = self.audio_prev_pts {
             if pts < prev {
@@ -322,15 +325,33 @@ impl<Writer: Write> Mp4Writer<Writer> {
             self.audio_last_delta = Some(delta);
         }
 
-        let raw = adts_to_raw(data).ok_or(Mp4WriterError::InvalidAdts)?;
-        if raw.len() > u32::MAX as usize {
+        // Process audio data based on codec
+        let sample_data = match audio_track.codec {
+            AudioCodec::Aac => {
+                let raw = adts_to_raw(data).ok_or(Mp4WriterError::InvalidAdts)?;
+                raw.to_vec()
+            }
+            AudioCodec::Opus => {
+                // Validate Opus packet structure
+                if !is_valid_opus_packet(data) {
+                    return Err(Mp4WriterError::InvalidOpusPacket);
+                }
+                // Opus packets are passed through as-is (no container framing)
+                data.to_vec()
+            }
+            AudioCodec::None => {
+                return Err(Mp4WriterError::AudioNotEnabled);
+            }
+        };
+
+        if sample_data.len() > u32::MAX as usize {
             return Err(Mp4WriterError::DurationOverflow);
         }
 
         self.audio_samples.push(SampleInfo {
             pts,
-            dts: pts,  // Audio: dts == pts (no B-frames in AAC)
-            data: raw.to_vec(),
+            dts: pts,  // Audio: dts == pts (no B-frames)
+            data: sample_data,
             is_keyframe: false,
             duration: None,
         });
@@ -753,12 +774,16 @@ fn build_audio_stbl_box(audio: &Mp4AudioTrack, tables: &SampleTables) -> Vec<u8>
 }
 
 fn build_audio_stsd_box(audio: &Mp4AudioTrack) -> Vec<u8> {
-    let mp4a_box = build_mp4a_box(audio);
+    let sample_entry_box = match audio.codec {
+        AudioCodec::Aac => build_mp4a_box(audio),
+        AudioCodec::Opus => build_opus_box(audio),
+        AudioCodec::None => build_mp4a_box(audio), // Fallback, shouldn't happen
+    };
 
     let mut payload = Vec::new();
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&1u32.to_be_bytes());
-    payload.extend_from_slice(&mp4a_box);
+    payload.extend_from_slice(&sample_entry_box);
     build_box(b"stsd", &payload)
 }
 
@@ -841,6 +866,83 @@ fn build_audio_specific_config(sample_rate: u32, channels: u16) -> [u8; 2] {
     let byte0 = (aot << 3) | (sfi >> 1);
     let byte1 = ((sfi & 1) << 7) | (chan << 3);
     [byte0, byte1]
+}
+
+/// Build an Opus sample entry box.
+fn build_opus_box(audio: &Mp4AudioTrack) -> Vec<u8> {
+    let mut payload = Vec::new();
+    // Reserved (6 bytes)
+    payload.extend_from_slice(&[0u8; 6]);
+    // Data reference index
+    payload.extend_from_slice(&1u16.to_be_bytes());
+    // Reserved (2 x u32)
+    payload.extend_from_slice(&0u32.to_be_bytes());
+    payload.extend_from_slice(&0u32.to_be_bytes());
+    // Channel count
+    payload.extend_from_slice(&audio.channels.to_be_bytes());
+    // Sample size (16 bits)
+    payload.extend_from_slice(&16u16.to_be_bytes());
+    // Pre-defined
+    payload.extend_from_slice(&0u16.to_be_bytes());
+    // Reserved
+    payload.extend_from_slice(&0u16.to_be_bytes());
+    // Sample rate (fixed point 16.16, always 48000 for Opus)
+    let rate_fixed = (OPUS_SAMPLE_RATE as u32) << 16;
+    payload.extend_from_slice(&rate_fixed.to_be_bytes());
+    
+    // dOps box (Opus decoder configuration)
+    let dops = build_dops_box(audio);
+    payload.extend_from_slice(&dops);
+    
+    build_box(b"Opus", &payload)
+}
+
+/// Build the dOps (Opus Decoder Configuration) box.
+///
+/// Structure per ISO/IEC 14496-3 Amendment 4:
+/// - Version (1 byte) = 0
+/// - OutputChannelCount (1 byte)
+/// - PreSkip (2 bytes, big-endian)
+/// - InputSampleRate (4 bytes, big-endian)
+/// - OutputGain (2 bytes, signed, big-endian)
+/// - ChannelMappingFamily (1 byte)
+/// - If ChannelMappingFamily != 0:
+///   - StreamCount (1 byte)
+///   - CoupledCount (1 byte)
+///   - ChannelMapping (OutputChannelCount bytes)
+fn build_dops_box(audio: &Mp4AudioTrack) -> Vec<u8> {
+    let config = OpusConfig::default()
+        .with_channels(audio.channels as u8);
+    
+    let mut payload = Vec::new();
+    // Version = 0
+    payload.push(config.version);
+    // OutputChannelCount
+    payload.push(config.output_channel_count);
+    // PreSkip (big-endian)
+    payload.extend_from_slice(&config.pre_skip.to_be_bytes());
+    // InputSampleRate (big-endian)
+    payload.extend_from_slice(&config.input_sample_rate.to_be_bytes());
+    // OutputGain (signed, big-endian)
+    payload.extend_from_slice(&config.output_gain.to_be_bytes());
+    // ChannelMappingFamily
+    payload.push(config.channel_mapping_family);
+    
+    // Extended channel mapping for family != 0
+    if config.channel_mapping_family != 0 {
+        payload.push(config.stream_count.unwrap_or(1));
+        payload.push(config.coupled_count.unwrap_or(0));
+        if let Some(mapping) = &config.channel_mapping {
+            payload.extend_from_slice(mapping);
+        } else {
+            // Default mapping for stereo
+            for i in 0..config.output_channel_count {
+                payload.push(i);
+            }
+        }
+    }
+    
+    build_box(b"dOps", &payload)
 }
 
 fn build_trak_box(video: &Mp4VideoTrack, tables: &SampleTables, video_config: &VideoConfig) -> Vec<u8> {

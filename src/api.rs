@@ -26,6 +26,9 @@ pub enum AudioCodec {
     /// AAC (Advanced Audio Coding) with ADTS framing.  Only AAC LC is
     /// expected to work in v0.
     Aac,
+    /// Opus audio codec. Raw Opus packets (no container framing).
+    /// Sample rate is always 48kHz per Opus spec.
+    Opus,
     /// No audio.  Use this variant when only video is being muxed.
     None,
 }
@@ -214,6 +217,7 @@ impl<Writer> MuxerBuilder<Writer> {
             writer.enable_audio(Mp4AudioTrack {
                 sample_rate: audio.sample_rate,
                 channels: audio.channels,
+                codec: audio.codec,
             });
         }
 
@@ -329,6 +333,10 @@ pub enum MuxerError {
     InvalidAdts {
         frame_index: u64,
     },
+    /// Audio sample is not a valid Opus packet.
+    InvalidOpusPacket {
+        frame_index: u64,
+    },
     /// DTS must be monotonically increasing.
     NonIncreasingDts {
         prev_dts: f64,
@@ -396,6 +404,10 @@ impl fmt::Display for MuxerError {
             }
             MuxerError::InvalidAdts { frame_index } => {
                 write!(f, "audio frame {} is not valid ADTS: ensure the frame starts with 0xFFF sync word",
+                       frame_index)
+            }
+            MuxerError::InvalidOpusPacket { frame_index } => {
+                write!(f, "audio frame {} is not a valid Opus packet: ensure the frame has valid TOC byte",
                        frame_index)
             }
             MuxerError::NonIncreasingDts { prev_dts, curr_dts, frame_index } => {
@@ -562,6 +574,7 @@ impl<Writer: Write> Muxer<Writer> {
             Mp4WriterError::FirstFrameMustBeKeyframe => MuxerError::FirstVideoFrameMustBeKeyframe,
             Mp4WriterError::FirstFrameMissingSpsPps => MuxerError::FirstVideoFrameMissingSpsPps,
             Mp4WriterError::InvalidAdts => MuxerError::InvalidAdts { frame_index },
+            Mp4WriterError::InvalidOpusPacket => MuxerError::InvalidOpusPacket { frame_index },
             Mp4WriterError::AudioNotEnabled => MuxerError::AudioNotConfigured,
             Mp4WriterError::DurationOverflow => MuxerError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,

@@ -1,13 +1,14 @@
 //! Codec configuration extraction for container muxing.
 //!
 //! This module provides minimal bitstream parsing required to build codec
-//! configuration boxes (avcC, hvcC, av1C). It does NOT perform decoding,
+//! configuration boxes (avcC, hvcC, av1C, dOps). It does NOT perform decoding,
 //! transcoding, or frame reconstruction.
 //!
 //! # Supported Codecs
 //!
 //! - **H.264/AVC**: Extract SPS/PPS from Annex B NAL units
 //! - **H.265/HEVC**: Extract VPS/SPS/PPS from Annex B NAL units
+//! - **Opus**: Parse TOC for frame duration, build dOps config
 //! - **AV1**: (stub - coming soon)
 //!
 //! # Input Format
@@ -22,7 +23,9 @@ pub mod common;
 pub mod h264;
 pub mod h265;
 pub mod av1;
+pub mod opus;
 
 pub use common::{find_start_code, AnnexBNalIter};
 pub use h264::{AvcConfig, extract_avc_config, annexb_to_avcc, is_h264_keyframe};
 pub use h265::{HevcConfig, extract_hevc_config, hevc_annexb_to_hvcc, is_hevc_keyframe};
+pub use opus::{OpusConfig, opus_packet_samples, is_valid_opus_packet, OPUS_SAMPLE_RATE};
