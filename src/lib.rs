@@ -55,3 +55,6 @@ pub mod fragmented;
 
 // Codec configuration extraction (minimal bitstream parsing)
 pub mod codec;
+
+// Invariant PPT testing framework
+pub mod invariant_ppt;

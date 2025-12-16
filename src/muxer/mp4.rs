@@ -2,6 +2,7 @@ use std::fmt;
 use std::io::{self, Write};
 
 use crate::api::{AudioCodec, Metadata, VideoCodec};
+use crate::assert_invariant;
 use crate::codec::h264::{AvcConfig, extract_avc_config, default_avc_config, annexb_to_avcc};
 use crate::codec::h265::{HevcConfig, extract_hevc_config, hevc_annexb_to_hvcc};
 use crate::codec::av1::{Av1Config, extract_av1_config};
@@ -1085,6 +1086,15 @@ fn build_stsc_box(samples_per_chunk: u32, chunk_count: u32) -> Vec<u8> {
 }
 
 fn build_stsz_box(sizes: &[u32]) -> Vec<u8> {
+    // INV-004: No empty samples (zero-size) in stsz
+    for (i, &size) in sizes.iter().enumerate() {
+        assert_invariant!(
+            size > 0,
+            "No empty samples in stsz",
+            &format!("build_stsz_box[{}]", i)
+        );
+    }
+    
     let mut payload = Vec::new();
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
@@ -1143,6 +1153,18 @@ fn build_ctts_box(cts_offsets: &[i32]) -> Vec<u8> {
 }
 
 fn build_avc1_box(video: &Mp4VideoTrack, avc_config: &AvcConfig) -> Vec<u8> {
+    // INV-002: Width/height must fit in 16-bit for visual sample entry
+    assert_invariant!(
+        video.width <= u16::MAX as u32,
+        "Width must fit in 16-bit",
+        "build_avc1_box"
+    );
+    assert_invariant!(
+        video.height <= u16::MAX as u32,
+        "Height must fit in 16-bit",
+        "build_avc1_box"
+    );
+    
     let mut payload = Vec::new();
     payload.extend_from_slice(&[0u8; 6]);
     payload.extend_from_slice(&1u16.to_be_bytes());
@@ -1191,6 +1213,18 @@ fn build_avcc_box(avc_config: &AvcConfig) -> Vec<u8> {
 
 /// Build an hvc1 sample entry box for HEVC video.
 fn build_hvc1_box(video: &Mp4VideoTrack, hevc_config: &HevcConfig) -> Vec<u8> {
+    // INV-002: Width/height must fit in 16-bit for visual sample entry
+    assert_invariant!(
+        video.width <= u16::MAX as u32,
+        "Width must fit in 16-bit",
+        "build_hvc1_box"
+    );
+    assert_invariant!(
+        video.height <= u16::MAX as u32,
+        "Height must fit in 16-bit",
+        "build_hvc1_box"
+    );
+    
     let mut payload = Vec::new();
     // Reserved (6 bytes)
     payload.extend_from_slice(&[0u8; 6]);
@@ -1301,6 +1335,18 @@ fn build_hvcc_box(hevc_config: &HevcConfig) -> Vec<u8> {
 
 /// Build an av01 sample entry box for AV1 video.
 fn build_av01_box(video: &Mp4VideoTrack, av1_config: &Av1Config) -> Vec<u8> {
+    // INV-002: Width/height must fit in 16-bit for visual sample entry
+    assert_invariant!(
+        video.width <= u16::MAX as u32,
+        "Width must fit in 16-bit",
+        "build_av01_box"
+    );
+    assert_invariant!(
+        video.height <= u16::MAX as u32,
+        "Height must fit in 16-bit",
+        "build_av01_box"
+    );
+    
     let mut payload = Vec::new();
     // Reserved (6 bytes)
     payload.extend_from_slice(&[0u8; 6]);
@@ -1533,6 +1579,14 @@ fn build_box(typ: &[u8; 4], payload: &[u8]) -> Vec<u8> {
     buffer.extend_from_slice(&length.to_be_bytes());
     buffer.extend_from_slice(typ);
     buffer.extend_from_slice(payload);
+    
+    // INV-001: Box size must equal header (8) + payload length
+    assert_invariant!(
+        buffer.len() == 8 + payload.len(),
+        "Box size must equal header + payload",
+        "build_box"
+    );
+    
     buffer
 }
 
