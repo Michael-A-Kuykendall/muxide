@@ -129,6 +129,11 @@ impl SampleTables {
             has_bframes,
         }
     }
+    
+    /// Calculate total duration in media timescale units
+    fn total_duration(&self) -> u64 {
+        self.durations.iter().map(|&d| d as u64).sum()
+    }
 }
 
 /// Errors produced while queuing video samples.
@@ -713,7 +718,11 @@ fn build_moov_box(
     video_config: &VideoConfig,
     metadata: Option<&Metadata>,
 ) -> Vec<u8> {
-    let mvhd_payload = build_mvhd_payload();
+    // Calculate duration in media timescale, then convert to movie timescale (ms)
+    let video_duration_media = video_tables.total_duration();
+    let video_duration_ms = (video_duration_media * MOVIE_TIMESCALE as u64 / MEDIA_TIMESCALE as u64) as u32;
+    
+    let mvhd_payload = build_mvhd_payload(video_duration_ms);
     let mvhd_box = build_box(b"mvhd", &mvhd_payload);
     let trak_box = build_trak_box(video, video_tables, video_config);
 
@@ -751,7 +760,8 @@ fn build_audio_tkhd_box() -> Vec<u8> {
 }
 
 fn build_audio_mdia_box(audio: &Mp4AudioTrack, tables: &SampleTables) -> Vec<u8> {
-    let mdhd_box = build_mdhd_box_with_timescale(MEDIA_TIMESCALE);
+    let duration = tables.total_duration();
+    let mdhd_box = build_mdhd_box_with_timescale(MEDIA_TIMESCALE, duration);
     let hdlr_box = build_sound_hdlr_box();
     let minf_box = build_audio_minf_box(audio, tables);
 
@@ -973,7 +983,8 @@ fn build_trak_box(video: &Mp4VideoTrack, tables: &SampleTables, video_config: &V
 }
 
 fn build_mdia_box(video: &Mp4VideoTrack, tables: &SampleTables, video_config: &VideoConfig) -> Vec<u8> {
-    let mdhd_box = build_mdhd_box();
+    let duration = tables.total_duration();
+    let mdhd_box = build_mdhd_box_with_timescale(MEDIA_TIMESCALE, duration);
     let hdlr_box = build_hdlr_box();
     let minf_box = build_minf_box(video, tables, video_config);
 
@@ -1140,8 +1151,9 @@ fn build_avc1_box(video: &Mp4VideoTrack, avc_config: &AvcConfig) -> Vec<u8> {
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
-    payload.extend_from_slice(&video.width.to_be_bytes());
-    payload.extend_from_slice(&video.height.to_be_bytes());
+    // Width and height are 16-bit values in the visual sample entry
+    payload.extend_from_slice(&(video.width as u16).to_be_bytes());
+    payload.extend_from_slice(&(video.height as u16).to_be_bytes());
     payload.extend_from_slice(&0x0048_0000_u32.to_be_bytes());
     payload.extend_from_slice(&0x0048_0000_u32.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
@@ -1190,9 +1202,9 @@ fn build_hvc1_box(video: &Mp4VideoTrack, hevc_config: &HevcConfig) -> Vec<u8> {
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
-    // Width and height
-    payload.extend_from_slice(&video.width.to_be_bytes());
-    payload.extend_from_slice(&video.height.to_be_bytes());
+    // Width and height are 16-bit values in the visual sample entry
+    payload.extend_from_slice(&(video.width as u16).to_be_bytes());
+    payload.extend_from_slice(&(video.height as u16).to_be_bytes());
     // Horizontal/vertical resolution (72 dpi fixed point)
     payload.extend_from_slice(&0x0048_0000_u32.to_be_bytes());
     payload.extend_from_slice(&0x0048_0000_u32.to_be_bytes());
@@ -1300,9 +1312,9 @@ fn build_av01_box(video: &Mp4VideoTrack, av1_config: &Av1Config) -> Vec<u8> {
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
-    // Width and height
-    payload.extend_from_slice(&video.width.to_be_bytes());
-    payload.extend_from_slice(&video.height.to_be_bytes());
+    // Width and height are 16-bit values in the visual sample entry
+    payload.extend_from_slice(&(video.width as u16).to_be_bytes());
+    payload.extend_from_slice(&(video.height as u16).to_be_bytes());
     // Horizontal/vertical resolution (72 dpi fixed point)
     payload.extend_from_slice(&0x0048_0000_u32.to_be_bytes());
     payload.extend_from_slice(&0x0048_0000_u32.to_be_bytes());
@@ -1388,18 +1400,22 @@ fn build_url_box() -> Vec<u8> {
 }
 
 fn build_mdhd_box() -> Vec<u8> {
-    build_mdhd_box_with_timescale(MEDIA_TIMESCALE)
+    build_mdhd_box_with_timescale_and_duration(MEDIA_TIMESCALE, 0)
 }
 
-fn build_mdhd_box_with_timescale(timescale: u32) -> Vec<u8> {
+fn build_mdhd_box_with_timescale(timescale: u32, duration: u64) -> Vec<u8> {
+    build_mdhd_box_with_timescale_and_duration(timescale, duration)
+}
+
+fn build_mdhd_box_with_timescale_and_duration(timescale: u32, duration: u64) -> Vec<u8> {
     let mut payload = Vec::new();
-    payload.extend_from_slice(&0u32.to_be_bytes());
-    payload.extend_from_slice(&0u32.to_be_bytes());
-    payload.extend_from_slice(&0u32.to_be_bytes());
+    payload.extend_from_slice(&0u32.to_be_bytes());  // version + flags
+    payload.extend_from_slice(&0u32.to_be_bytes());  // creation_time
+    payload.extend_from_slice(&0u32.to_be_bytes());  // modification_time
     payload.extend_from_slice(&timescale.to_be_bytes());
-    payload.extend_from_slice(&0u32.to_be_bytes());
-    payload.extend_from_slice(&0x55c4u16.to_be_bytes());
-    payload.extend_from_slice(&0u16.to_be_bytes());
+    payload.extend_from_slice(&(duration as u32).to_be_bytes());  // duration
+    payload.extend_from_slice(&0x55c4u16.to_be_bytes());  // language (und)
+    payload.extend_from_slice(&0u16.to_be_bytes());  // pre_defined
     build_box(b"mdhd", &payload)
 }
 
@@ -1479,17 +1495,17 @@ fn build_ftyp_box() -> Vec<u8> {
     build_box(b"ftyp", &payload)
 }
 
-fn build_mvhd_payload() -> Vec<u8> {
+fn build_mvhd_payload(duration_ms: u32) -> Vec<u8> {
     let mut payload = Vec::new();
-    payload.extend_from_slice(&0u32.to_be_bytes());
-    payload.extend_from_slice(&0u32.to_be_bytes());
-    payload.extend_from_slice(&0u32.to_be_bytes());
-    payload.extend_from_slice(&MOVIE_TIMESCALE.to_be_bytes());
-    payload.extend_from_slice(&0u32.to_be_bytes());
-    payload.extend_from_slice(&0x0001_0000_u32.to_be_bytes());
-    payload.extend_from_slice(&0x0100u16.to_be_bytes());
-    payload.extend_from_slice(&0u16.to_be_bytes());
-    payload.extend_from_slice(&0u64.to_be_bytes());
+    payload.extend_from_slice(&0u32.to_be_bytes());  // version + flags
+    payload.extend_from_slice(&0u32.to_be_bytes());  // creation_time
+    payload.extend_from_slice(&0u32.to_be_bytes());  // modification_time
+    payload.extend_from_slice(&MOVIE_TIMESCALE.to_be_bytes());  // timescale (1000 = ms)
+    payload.extend_from_slice(&duration_ms.to_be_bytes());  // duration in ms
+    payload.extend_from_slice(&0x0001_0000_u32.to_be_bytes());  // rate (1.0)
+    payload.extend_from_slice(&0x0100u16.to_be_bytes());  // volume (1.0)
+    payload.extend_from_slice(&0u16.to_be_bytes());  // reserved
+    payload.extend_from_slice(&0u64.to_be_bytes());  // reserved
     let matrix = [
         0x0001_0000_u32,
         0,
@@ -1505,9 +1521,9 @@ fn build_mvhd_payload() -> Vec<u8> {
         payload.extend_from_slice(&value.to_be_bytes());
     }
     for _ in 0..6 {
-        payload.extend_from_slice(&0u32.to_be_bytes());
+        payload.extend_from_slice(&0u32.to_be_bytes());  // pre_defined
     }
-    payload.extend_from_slice(&1u32.to_be_bytes());
+    payload.extend_from_slice(&2u32.to_be_bytes());  // next_track_ID
     payload
 }
 

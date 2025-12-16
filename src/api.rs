@@ -311,6 +311,10 @@ pub enum MuxerError {
     EmptyAudioFrame {
         frame_index: u64,
     },
+    /// Video sample is empty.
+    EmptyVideoFrame {
+        frame_index: u64,
+    },
     /// Video timestamps must be strictly increasing.
     NonIncreasingVideoPts {
         prev_pts: f64,
@@ -379,6 +383,9 @@ impl fmt::Display for MuxerError {
             }
             MuxerError::EmptyAudioFrame { frame_index } => {
                 write!(f, "audio frame {} is empty: ADTS frames must contain data", frame_index)
+            }
+            MuxerError::EmptyVideoFrame { frame_index } => {
+                write!(f, "video frame {} is empty: video samples must contain NAL units", frame_index)
             }
             MuxerError::NonIncreasingVideoPts { prev_pts, curr_pts, frame_index } => {
                 write!(f, "video frame {} has PTS {:.3}s which is not greater than previous PTS {:.3}s: \
@@ -471,6 +478,11 @@ impl<Writer: Write> Muxer<Writer> {
         
         let frame_index = self.video_frame_count;
         
+        // Reject empty frames - they cause playback issues
+        if data.is_empty() {
+            return Err(MuxerError::EmptyVideoFrame { frame_index });
+        }
+        
         // Validate PTS is non-negative
         if pts < 0.0 {
             return Err(MuxerError::NegativeVideoPts { pts, frame_index });
@@ -528,6 +540,11 @@ impl<Writer: Write> Muxer<Writer> {
         }
         
         let frame_index = self.video_frame_count;
+        
+        // Reject empty frames - they cause playback issues
+        if data.is_empty() {
+            return Err(MuxerError::EmptyVideoFrame { frame_index });
+        }
         
         // Validate PTS is non-negative
         if pts < 0.0 {
