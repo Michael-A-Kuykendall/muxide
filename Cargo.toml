@@ -10,7 +10,7 @@ repository = "https://github.com/Michael-A-Kuykendall/muxide"
 homepage = "https://github.com/Michael-A-Kuykendall/muxide"
 documentation = "https://docs.rs/muxide"
 license = "MIT OR Apache-2.0"
-keywords = ["mp4", "isobmff", "h264", "mux", "recording"]
+keywords = ["mp4", "isobmff", "h264", "hevc", "av1", "mux", "recording"]
 categories = ["multimedia", "encoding"]
 exclude = [".github/", ".vscode/", "target/"]
 

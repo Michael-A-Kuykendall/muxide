@@ -12,14 +12,26 @@
 
 ## Features
 
-- ✅ **H.264/AVC** video (Annex B format)
-- ✅ **AAC** audio (ADTS format)
+### Video Codecs
+- ✅ **H.264/AVC** (Annex B format)
+- ✅ **H.265/HEVC** (Annex B format with VPS/SPS/PPS)
+- ✅ **AV1** (OBU stream format)
+
+### Audio Codecs
+- ✅ **AAC** (ADTS format)
+- ✅ **Opus** (raw packets, 48kHz)
+
+### Container Features
 - ✅ **Fast-start** (moov before mdat) for instant web playback
 - ✅ **B-frame support** via explicit PTS/DTS
 - ✅ **Fragmented MP4** for DASH/HLS streaming
 - ✅ **Metadata** (title, creation time)
-- ✅ **Zero dependencies** (only std)
-- ✅ **MIT licensed** (no GPL)
+
+### Philosophy
+- ✅ **Zero runtime dependencies** (only std)
+- ✅ **Pure Rust** (no unsafe, no FFI)
+- ✅ **114 tests**, 86% coverage
+- ✅ **MIT OR Apache-2.0** (no GPL)
 
 ## Quick Start
 
@@ -63,10 +75,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 |---------|--------|-------------|--------|--------|
 | Pure Rust | ✅ | ✅ | ✅ | ❌ |
 | Zero deps | ✅ | ❌ (6 deps) | ✅ | ❌ |
+| H.264 | ✅ | ✅ | ✅ | ✅ |
+| H.265/HEVC | ✅ | ❌ | ❌ | ✅ |
+| AV1 | ✅ | ❌ | ❌ | ✅ |
 | Fast-start | ✅ | ❌ | ❌ | ✅ |
 | MIT license | ✅ | ✅ | ✅ | ❌ (GPL) |
 | Maintained | ✅ | ❌ (2yr stale) | 🟡 | ✅ |
-| Builder API | ✅ | ❌ | ❌ | N/A |
 
 ## Documentation
 
