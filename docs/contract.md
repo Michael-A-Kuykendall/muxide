@@ -8,12 +8,15 @@ Muxide exposes a builder pattern for creating a `Muxer` instance that writes an 
 
 ### Types
 
-* `VideoCodec`: Enumeration of supported video codecs.  In v0.1.0 this enum has a single variant:
-  * `H264` — Represents the H.264/AVC video codec.  Bitstreams must be in Annex B format.  B‑frames are not supported; frames must be supplied in presentation order.
+* `VideoCodec`: Enumeration of supported video codecs.
+  * `H264` — H.264/AVC video codec. Bitstreams must be in Annex B format.
+  * `H265` — H.265/HEVC video codec. Bitstreams must be in Annex B format.
+  * `Av1` — AV1 video codec. Bitstreams must be supplied as an OBU stream.
 
-* `AudioCodec`: Enumeration of supported audio codecs.  In v0.1.0 this enum has two variants:
-  * `Aac` — Represents the AAC audio codec, encoded in ADTS frames.  Only AAC Low Complexity (LC) profiles are expected to play back correctly.
-  * `None` — Indicates that no audio track will be created.  Use this when only video is being muxed.
+* `AudioCodec`: Enumeration of supported audio codecs.
+  * `Aac` — AAC audio codec, encoded as ADTS frames. Only AAC LC is expected to play back correctly.
+  * `Opus` — Opus audio codec, supplied as raw Opus packets. (In MP4, Opus is always signaled at 48 kHz.)
+  * `None` — Indicates that no audio track will be created.
 
 * `MuxerBuilder<Writer>` — Type parameterised by an output writer.  Provides methods to configure the container and tracks and to build a `Muxer`.  The builder consumes itself on `build`.
 
@@ -51,16 +54,22 @@ Muxide converts incoming timestamps in seconds (`pts: f64`) into a fixed interna
 * `write_video(&mut self, pts: f64, data: &[u8], is_keyframe: bool) -> Result<(), MuxerError>` — Writes a video frame to the container.
 
   **Invariants:**
-  - `pts` **must be non‑negative and strictly greater than the `pts` of the previous video frame**.  Violations produce `MuxerError::NegativeVideoPts` or `MuxerError::NonIncreasingVideoPts`.
+  - `pts` **must be non‑negative and strictly greater than the `pts` of the previous video frame**. Violations produce `MuxerError::NegativeVideoPts` or `MuxerError::NonIncreasingVideoPts`.
   - `data` must contain a complete encoded frame in Annex B format.  The first video frame of a file must be a keyframe and must contain SPS and PPS NAL units; otherwise `MuxerError::FirstVideoFrameMustBeKeyframe` or `MuxerError::FirstVideoFrameMissingSpsPps` is returned.
   - `is_keyframe` must accurately reflect whether the frame is a keyframe (IDR picture).  Incorrect keyframe flags may result in unseekable files.
+
+  **B-frames:**
+  - `write_video()` is intended for streams where **PTS == DTS** (no reordering).
+  - For streams with B-frames (PTS != DTS), use `write_video_with_dts()` and feed frames in decode order.
 
 * `write_audio(&mut self, pts: f64, data: &[u8]) -> Result<(), MuxerError>` — Writes an audio frame to the container.
 
   **Invariants:**
   - `pts` **must be non‑negative and strictly greater than or equal to the `pts` of the previous audio frame**.
   - Audio must not arrive before the first video frame (i.e. audio `pts` must be >= video `pts`).
-  - `data` must contain a complete encoded AAC frame (ADTS).  Empty frames cause an error.
+  - `data` must contain a complete encoded audio frame:
+    - AAC must be ADTS; invalid ADTS is rejected.
+    - Opus must be a structurally valid Opus packet; invalid packets are rejected.
 
 * `finish(self) -> Result<(), MuxerError>` — Finalises the container.  After calling this method, no further `write_*` calls may be made.  This method writes any pending metadata (e.g. `moov` box) to the output writer.
 
@@ -76,17 +85,27 @@ All functions that can fail return a `MuxerError`. New error variants may be add
 
 ### Concurrency & Thread Safety
 
-The v0.1.0 implementation is single‑threaded and does not make any guarantees about `Send` or `Sync` for the `Muxer` type.  Future releases may add asynchronous and multi‑threaded variants.
+`Muxer<W>` is `Send` when `W: Send` and `Sync` when `W: Sync`.
+
+Muxide itself is implemented as a single-threaded writer; thread-safety here refers to moving/sharing the muxer value when the underlying writer type supports it.
 
 ## Invariants & Correctness Rules
 
-1. **Monotonic Timestamps:** For each track, presentation timestamps (`pts`) must be non‑negative and strictly increasing (video) or non‑decreasing (audio).  If this invariant is violated, the operation must fail.
+1. **Monotonic Timestamps:** For each track, presentation timestamps (`pts`) must be non‑negative and strictly increasing (video) or non‑decreasing (audio). If this invariant is violated, the operation must fail.
 2. **Keyframes:** The first video frame must be a keyframe containing SPS and PPS.  Subsequent keyframes must be marked via the `is_keyframe` flag.  Files produced without proper keyframe signalling will not play back correctly and are considered incorrect.
 3. **Single Video Track:** Exactly one video track is supported.  Multiple video tracks or the absence of a video track is an error.
 4. **Single Audio Track:** At most one audio track is supported.  Adding multiple audio tracks is not allowed.
-5. **No B‑frames:** The v0.1.0 implementation does not support frame reordering (no B‑frames).  Inputs containing B‑frames must be rejected.
-6. **Annex B only:** H.264 bitstreams must be provided in Annex B format (NAL units prefaced by start codes).  MP4 native format (length‑prefixed NAL units) is not supported for input.
-7. **ADTS only:** AAC audio must be provided as ADTS frames.  Raw AAC or other container formats (e.g. MP4 audio atoms) are not supported.
+5. **B‑frames:** Streams with reordering (B-frames) are supported when callers use `write_video_with_dts()`:
+  - Frames must be supplied in **decode order**.
+  - DTS must be strictly increasing.
+  - PTS may differ from DTS.
+  For streams without reordering, callers may use `write_video()` which assumes PTS == DTS.
+6. **Bitstream formats:**
+  - H.264/H.265 video must be provided in Annex B format (start-code-prefixed NAL units).
+  - AV1 video must be provided as an OBU stream.
+7. **Audio formats:**
+  - AAC audio must be provided as ADTS frames.
+  - Opus audio must be provided as raw Opus packets.
 
 ## B-frame Support
 

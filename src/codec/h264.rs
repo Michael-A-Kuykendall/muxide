@@ -75,9 +75,7 @@ impl AvcConfig {
 ///
 /// Used as fallback when no SPS is provided in the stream.
 /// Matches the original Muxide default for backwards compatibility.
-pub const DEFAULT_SPS: &[u8] = &[
-    0x67, 0x42, 0x00, 0x1e, 0xda, 0x02, 0x80, 0x2d, 0x8b, 0x11,
-];
+pub const DEFAULT_SPS: &[u8] = &[0x67, 0x42, 0x00, 0x1e, 0xda, 0x02, 0x80, 0x2d, 0x8b, 0x11];
 
 /// Default PPS.
 ///
@@ -122,15 +120,15 @@ pub fn extract_avc_config(data: &[u8]) -> Option<AvcConfig> {
         if nal.is_empty() {
             continue;
         }
-        
+
         let nal_type = nal[0] & 0x1f;
-        
+
         if nal_type == nal_type::SPS && sps.is_none() {
             sps = Some(nal);
         } else if nal_type == nal_type::PPS && pps.is_none() {
             pps = Some(nal);
         }
-        
+
         // Early exit once we have both
         if sps.is_some() && pps.is_some() {
             break;
@@ -181,7 +179,7 @@ pub fn default_avc_config() -> AvcConfig {
 /// ```
 pub fn annexb_to_avcc(data: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
-    
+
     for nal in AnnexBNalIter::new(data) {
         if nal.is_empty() {
             continue;
@@ -232,9 +230,9 @@ mod tests {
     #[test]
     fn test_extract_avc_config_success() {
         let data = [
-            0x00, 0x00, 0x00, 0x01, 0x67, 0x64, 0x00, 0x1f,  // SPS (type 7)
-            0x00, 0x00, 0x00, 0x01, 0x68, 0xeb, 0xe3, 0xcb,  // PPS (type 8)
-            0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x00,  // IDR (type 5)
+            0x00, 0x00, 0x00, 0x01, 0x67, 0x64, 0x00, 0x1f, // SPS (type 7)
+            0x00, 0x00, 0x00, 0x01, 0x68, 0xeb, 0xe3, 0xcb, // PPS (type 8)
+            0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x00, // IDR (type 5)
         ];
 
         let config = extract_avc_config(&data).unwrap();
@@ -245,7 +243,7 @@ mod tests {
     #[test]
     fn test_extract_avc_config_missing_sps() {
         let data = [
-            0x00, 0x00, 0x00, 0x01, 0x68, 0xeb, 0xe3, 0xcb,  // PPS only
+            0x00, 0x00, 0x00, 0x01, 0x68, 0xeb, 0xe3, 0xcb, // PPS only
         ];
         assert!(extract_avc_config(&data).is_none());
     }
@@ -253,7 +251,7 @@ mod tests {
     #[test]
     fn test_extract_avc_config_missing_pps() {
         let data = [
-            0x00, 0x00, 0x00, 0x01, 0x67, 0x64, 0x00, 0x1f,  // SPS only
+            0x00, 0x00, 0x00, 0x01, 0x67, 0x64, 0x00, 0x1f, // SPS only
         ];
         assert!(extract_avc_config(&data).is_none());
     }
@@ -261,28 +259,28 @@ mod tests {
     #[test]
     fn test_avc_config_accessors() {
         let config = AvcConfig::new(
-            vec![0x67, 0x64, 0x00, 0x28],  // High profile, level 4.0
+            vec![0x67, 0x64, 0x00, 0x28], // High profile, level 4.0
             vec![0x68, 0xeb],
         );
-        
-        assert_eq!(config.profile_idc(), 0x64);  // 100 = High
+
+        assert_eq!(config.profile_idc(), 0x64); // 100 = High
         assert_eq!(config.profile_compatibility(), 0x00);
-        assert_eq!(config.level_idc(), 0x28);    // 40 = Level 4.0
+        assert_eq!(config.level_idc(), 0x28); // 40 = Level 4.0
     }
 
     #[test]
     fn test_annexb_to_avcc() {
         let annexb = [
-            0x00, 0x00, 0x00, 0x01, 0x67, 0x64, 0x00,  // SPS (3 bytes)
-            0x00, 0x00, 0x00, 0x01, 0x68, 0xeb,        // PPS (2 bytes)
+            0x00, 0x00, 0x00, 0x01, 0x67, 0x64, 0x00, // SPS (3 bytes)
+            0x00, 0x00, 0x00, 0x01, 0x68, 0xeb, // PPS (2 bytes)
         ];
 
         let avcc = annexb_to_avcc(&annexb);
-        
+
         // First NAL: length 3 + data
         assert_eq!(&avcc[0..4], &[0x00, 0x00, 0x00, 0x03]);
         assert_eq!(&avcc[4..7], &[0x67, 0x64, 0x00]);
-        
+
         // Second NAL: length 2 + data
         assert_eq!(&avcc[7..11], &[0x00, 0x00, 0x00, 0x02]);
         assert_eq!(&avcc[11..13], &[0x68, 0xeb]);
@@ -293,7 +291,7 @@ mod tests {
         // Data without start codes - treated as single NAL
         let data = [0x65, 0x88, 0x84];
         let avcc = annexb_to_avcc(&data);
-        
+
         assert_eq!(&avcc[0..4], &[0x00, 0x00, 0x00, 0x03]);
         assert_eq!(&avcc[4..7], &[0x65, 0x88, 0x84]);
     }
@@ -301,8 +299,8 @@ mod tests {
     #[test]
     fn test_is_keyframe_idr() {
         let idr_frame = [
-            0x00, 0x00, 0x00, 0x01, 0x67, 0x64,  // SPS
-            0x00, 0x00, 0x00, 0x01, 0x65, 0x88,  // IDR (type 5)
+            0x00, 0x00, 0x00, 0x01, 0x67, 0x64, // SPS
+            0x00, 0x00, 0x00, 0x01, 0x65, 0x88, // IDR (type 5)
         ];
         assert!(is_h264_keyframe(&idr_frame));
     }
@@ -310,7 +308,7 @@ mod tests {
     #[test]
     fn test_is_keyframe_non_idr() {
         let p_frame = [
-            0x00, 0x00, 0x00, 0x01, 0x41, 0x9a,  // Non-IDR (type 1)
+            0x00, 0x00, 0x00, 0x01, 0x41, 0x9a, // Non-IDR (type 1)
         ];
         assert!(!is_h264_keyframe(&p_frame));
     }

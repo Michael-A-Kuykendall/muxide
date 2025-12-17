@@ -89,7 +89,7 @@ impl MuxerConfig {
             framerate,
             audio: None,
             metadata: None,
-            fast_start: true,  // Default ON for web compatibility
+            fast_start: true, // Default ON for web compatibility
         }
     }
 
@@ -154,7 +154,7 @@ impl<Writer> MuxerBuilder<Writer> {
             video: None,
             audio: None,
             metadata: None,
-            fast_start: true,  // Default ON for web compatibility
+            fast_start: true, // Default ON for web compatibility
         }
     }
 
@@ -268,6 +268,12 @@ pub struct AudioTrackConfig {
 /// Opaque muxer type.  Users interact with this type to write frames
 /// into the container.  Implementation details are hidden in a private
 /// module.
+///
+/// # Thread Safety
+///
+/// `Muxer<W>` is `Send` when `W: Send` and `Sync` when `W: Sync`.
+/// This means you can safely move a `Muxer<File>` between threads or
+/// share a `Muxer<Vec<u8>>` across threads (with appropriate synchronization).
 pub struct Muxer<Writer> {
     writer: Mp4Writer<Writer>,
     video_track: VideoTrackConfig,
@@ -296,25 +302,15 @@ pub enum MuxerError {
     /// The muxer has already been finished.
     AlreadyFinished,
     /// Video `pts` must be non-negative.
-    NegativeVideoPts {
-        pts: f64,
-        frame_index: u64,
-    },
+    NegativeVideoPts { pts: f64, frame_index: u64 },
     /// Audio `pts` must be non-negative.
-    NegativeAudioPts {
-        pts: f64,
-        frame_index: u64,
-    },
+    NegativeAudioPts { pts: f64, frame_index: u64 },
     /// Audio was written but no audio track was configured.
     AudioNotConfigured,
     /// Audio sample is empty.
-    EmptyAudioFrame {
-        frame_index: u64,
-    },
+    EmptyAudioFrame { frame_index: u64 },
     /// Video sample is empty.
-    EmptyVideoFrame {
-        frame_index: u64,
-    },
+    EmptyVideoFrame { frame_index: u64 },
     /// Video timestamps must be strictly increasing.
     NonIncreasingVideoPts {
         prev_pts: f64,
@@ -339,13 +335,9 @@ pub enum MuxerError {
     /// The first AV1 keyframe must include a Sequence Header OBU.
     FirstAv1FrameMissingSequenceHeader,
     /// Audio sample is not a valid ADTS frame.
-    InvalidAdts {
-        frame_index: u64,
-    },
+    InvalidAdts { frame_index: u64 },
     /// Audio sample is not a valid Opus packet.
-    InvalidOpusPacket {
-        frame_index: u64,
-    },
+    InvalidOpusPacket { frame_index: u64 },
     /// DTS must be monotonically increasing.
     NonIncreasingDts {
         prev_dts: f64,
@@ -475,19 +467,19 @@ impl<Writer: Write> Muxer<Writer> {
         if self.finished {
             return Err(MuxerError::AlreadyFinished);
         }
-        
+
         let frame_index = self.video_frame_count;
-        
+
         // Reject empty frames - they cause playback issues
         if data.is_empty() {
             return Err(MuxerError::EmptyVideoFrame { frame_index });
         }
-        
+
         // Validate PTS is non-negative
         if pts < 0.0 {
             return Err(MuxerError::NegativeVideoPts { pts, frame_index });
         }
-        
+
         // Validate PTS is strictly increasing
         if let Some(prev) = self.last_video_pts {
             if pts <= prev {
@@ -498,18 +490,18 @@ impl<Writer: Write> Muxer<Writer> {
                 });
             }
         }
-        
+
         let scaled_pts = (pts * MEDIA_TIMESCALE as f64).round();
         let pts_units = scaled_pts as u64;
-        
+
         if self.first_video_pts.is_none() {
             self.first_video_pts = Some(pts);
         }
-        
+
         self.writer
             .write_video_sample(pts_units, data, is_keyframe)
             .map_err(|e| self.convert_mp4_error(e, frame_index))?;
-        
+
         self.last_video_pts = Some(pts);
         self.video_frame_count += 1;
         Ok(())
@@ -519,7 +511,7 @@ impl<Writer: Write> Muxer<Writer> {
     ///
     /// - `pts` is the presentation timestamp in seconds (display order)
     /// - `dts` is the decode timestamp in seconds (decode order)
-    /// 
+    ///
     /// For streams with B-frames, PTS and DTS may differ. The only constraint is that
     /// DTS must be strictly monotonically increasing (frames must be fed in decode order).
     ///
@@ -538,27 +530,30 @@ impl<Writer: Write> Muxer<Writer> {
         if self.finished {
             return Err(MuxerError::AlreadyFinished);
         }
-        
+
         let frame_index = self.video_frame_count;
-        
+
         // Reject empty frames - they cause playback issues
         if data.is_empty() {
             return Err(MuxerError::EmptyVideoFrame { frame_index });
         }
-        
+
         // Validate PTS is non-negative
         if pts < 0.0 {
             return Err(MuxerError::NegativeVideoPts { pts, frame_index });
         }
-        
+
         // Validate DTS is non-negative
         if dts < 0.0 {
-            return Err(MuxerError::NegativeVideoPts { pts: dts, frame_index });
+            return Err(MuxerError::NegativeVideoPts {
+                pts: dts,
+                frame_index,
+            });
         }
-        
+
         // Note: PTS can be less than DTS for B-frames (displayed before their decode position)
         // This is valid and expected for B-frame streams.
-        
+
         // Validate DTS is strictly increasing
         if let Some(prev_dts) = self.last_video_dts {
             if dts <= prev_dts {
@@ -569,26 +564,26 @@ impl<Writer: Write> Muxer<Writer> {
                 });
             }
         }
-        
+
         let scaled_pts = (pts * MEDIA_TIMESCALE as f64).round();
         let pts_units = scaled_pts as u64;
         let scaled_dts = (dts * MEDIA_TIMESCALE as f64).round();
         let dts_units = scaled_dts as u64;
-        
+
         if self.first_video_pts.is_none() {
             self.first_video_pts = Some(pts);
         }
-        
+
         self.writer
             .write_video_sample_with_dts(pts_units, dts_units, data, is_keyframe)
             .map_err(|e| self.convert_mp4_error(e, frame_index))?;
-        
+
         self.last_video_pts = Some(pts);
         self.last_video_dts = Some(dts);
         self.video_frame_count += 1;
         Ok(())
     }
-    
+
     /// Convert internal Mp4WriterError to MuxerError with context
     fn convert_mp4_error(&self, err: Mp4WriterError, frame_index: u64) -> MuxerError {
         match err {
@@ -599,7 +594,9 @@ impl<Writer: Write> Muxer<Writer> {
             },
             Mp4WriterError::FirstFrameMustBeKeyframe => MuxerError::FirstVideoFrameMustBeKeyframe,
             Mp4WriterError::FirstFrameMissingSpsPps => MuxerError::FirstVideoFrameMissingSpsPps,
-            Mp4WriterError::FirstFrameMissingSequenceHeader => MuxerError::FirstAv1FrameMissingSequenceHeader,
+            Mp4WriterError::FirstFrameMissingSequenceHeader => {
+                MuxerError::FirstAv1FrameMissingSequenceHeader
+            }
             Mp4WriterError::InvalidAdts => MuxerError::InvalidAdts { frame_index },
             Mp4WriterError::InvalidOpusPacket => MuxerError::InvalidOpusPacket { frame_index },
             Mp4WriterError::AudioNotEnabled => MuxerError::AudioNotConfigured,
@@ -623,19 +620,19 @@ impl<Writer: Write> Muxer<Writer> {
         if self.audio_track.is_none() {
             return Err(MuxerError::AudioNotConfigured);
         }
-        
+
         let frame_index = self.audio_frame_count;
-        
+
         // Validate PTS is non-negative
         if pts < 0.0 {
             return Err(MuxerError::NegativeAudioPts { pts, frame_index });
         }
-        
+
         // Validate frame is not empty
         if data.is_empty() {
             return Err(MuxerError::EmptyAudioFrame { frame_index });
         }
-        
+
         // Validate PTS is non-decreasing
         if let Some(prev) = self.last_audio_pts {
             if pts < prev {
@@ -646,7 +643,7 @@ impl<Writer: Write> Muxer<Writer> {
                 });
             }
         }
-        
+
         // Validate audio doesn't precede first video
         if let Some(first_video) = self.first_video_pts {
             if pts < first_video {
@@ -664,10 +661,11 @@ impl<Writer: Write> Muxer<Writer> {
 
         let scaled_pts = (pts * MEDIA_TIMESCALE as f64).round();
         let pts_units = scaled_pts as u64;
-        
-        self.writer.write_audio_sample(pts_units, data)
+
+        self.writer
+            .write_audio_sample(pts_units, data)
             .map_err(|e| self.convert_mp4_error(e, frame_index))?;
-        
+
         self.last_audio_pts = Some(pts);
         self.audio_frame_count += 1;
         Ok(())
@@ -690,7 +688,8 @@ impl<Writer: Write> Muxer<Writer> {
             width: self.video_track.width,
             height: self.video_track.height,
         };
-        self.writer.finalize(&params, self.metadata.as_ref(), self.fast_start)?;
+        self.writer
+            .finalize(&params, self.metadata.as_ref(), self.fast_start)?;
         self.finished = true;
 
         let video_frames = self.writer.video_sample_count();
@@ -714,5 +713,32 @@ impl<Writer: Write> Muxer<Writer> {
     /// Finalise the container and return muxing statistics.
     pub fn finish_with_stats(mut self) -> Result<MuxerStats, MuxerError> {
         self.finish_in_place_with_stats()
+    }
+}
+
+// Static assertions for thread safety
+#[cfg(test)]
+mod thread_safety_tests {
+    use super::*;
+
+    fn assert_send<T: Send>() {}
+    fn assert_sync<T: Sync>() {}
+
+    #[test]
+    fn muxer_is_send_when_writer_is_send() {
+        assert_send::<Muxer<std::fs::File>>();
+        assert_send::<Muxer<Vec<u8>>>();
+    }
+
+    #[test]
+    fn muxer_is_sync_when_writer_is_sync() {
+        assert_sync::<Muxer<std::fs::File>>();
+        assert_sync::<Muxer<Vec<u8>>>();
+    }
+
+    #[test]
+    fn builder_is_send_sync() {
+        assert_send::<MuxerBuilder<std::fs::File>>();
+        assert_sync::<MuxerBuilder<std::fs::File>>();
     }
 }

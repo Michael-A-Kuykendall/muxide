@@ -46,11 +46,11 @@ Security issues we care about:
 
 Muxide is designed with security in mind:
 
-1. **Pure Rust** - Memory safety guaranteed by the compiler
-2. **Zero dependencies** - No supply chain attack surface
+1. **Pure Rust** - Memory safety enforced by Rust’s guarantees
+2. **Zero runtime dependencies** - No third-party runtime dependency supply chain
 3. **No unsafe code** - All code is safe Rust
 4. **Input validation** - All inputs are validated before processing
-5. **Bounded operations** - No unbounded allocations from user input
+5. **Bounded operations** - Avoids unbounded allocations from user input where practical
 
 ## Acknowledgments
 

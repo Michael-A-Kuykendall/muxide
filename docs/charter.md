@@ -1,14 +1,14 @@
 # Muxide Charter (v0.1.0)
 
-This charter freezes the goals, non‑goals and constraints for the **Muxide** project prior to the first implementation slices.  It is an immutable reference for the duration of the v0.1.0 development cycle and should not be modified once agreed upon.
+This document started as a “freeze the slice ladder” charter. The crate has since evolved beyond the original minimal scope; this charter is kept **aligned with the published v0.1.0 implementation** so the repository does not contain contradictory statements.
 
 ## Goal
 
 Deliver a **recording‑oriented MP4 writer** in pure Rust that:
 
 1. Provides a **simple API**: *just give me encoded frames and timestamps; I will write an MP4 file*.
-2. Supports **H.264 video** and optional **AAC audio**.
-3. Enforces **monotonic timestamps**, rejects unsupported features (e.g. B‑frames), and fails fast on invalid inputs.
+2. Supports **H.264/H.265/AV1 video** and optional **AAC/Opus audio**.
+3. Enforces **monotonic timestamps**, fails fast on invalid inputs, and supports B-frames when callers provide explicit PTS/DTS.
 4. Produces files that play correctly in major players (QuickTime, VLC, Windows Movies & TV, Chromium) without requiring external tools.
 5. Adheres to the **Slice‑Gated Engineering Doctrine**: work is delivered in small, verifiable slices with objective gates, and no refactoring or extra features are introduced until v0.1.0 is complete.
 
@@ -23,12 +23,10 @@ A v0.1.0 release is considered complete when all of the following are true:
 
 ## Non‑Goals
 
-The following are explicitly out of scope for v0.1.0 and must not be implemented until a future milestone:
+The following are explicitly out of scope for v0.1.0:
 
 * **Alternative containers** (MKV, WebM, MOV).
-* **Streaming formats** (fragmented MP4, CMAF, DASH, HLS).
-* **Additional codecs** (H.265/HEVC, VP9, AV1, Opus, FLAC, PCM).
-* **B‑frame support** or any re‑ordering of video frames.
+* **Content protection** (DRM/encryption).
 * **Random access editing** (insertion/deletion of frames after writing).
 * **Asynchronous IO or non‑blocking writers**.
 * **Performance optimisations** (e.g. SIMD, multithreading).
@@ -56,7 +54,7 @@ During development, the following will serve as sources of truth and correctness
 
 ## Versions
 
-* **v0.1.0**: Core MP4 muxing with H.264 video and optional AAC audio; single video and audio track; no B‑frames; blocking IO.
-* **v0.2.0+**: Fragmented MP4, multiple containers, additional codecs, streaming support, performance improvements.
+* **v0.1.0**: MP4 muxing with H.264/H.265/AV1 video and optional AAC/Opus audio; single video and audio track; blocking IO. B-frames are supported when the caller supplies PTS/DTS explicitly.
+* **v0.2.0+**: Multiple containers, async writers, additional streaming modes, and performance improvements.
 
 Once this charter is committed, it should remain unchanged for the duration of the v0.1.0 cycle.  Future releases may introduce a new charter.

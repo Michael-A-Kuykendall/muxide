@@ -90,7 +90,10 @@ impl HevcConfig {
 
     /// Extract general_tier_flag from the SPS (bit 2 of byte 3).
     pub fn general_tier_flag(&self) -> bool {
-        self.sps.get(3).map(|b| (b >> 5) & 0x01 != 0).unwrap_or(false)
+        self.sps
+            .get(3)
+            .map(|b| (b >> 5) & 0x01 != 0)
+            .unwrap_or(false)
     }
 
     /// Extract general_profile_idc from the SPS (bits 3-7 of byte 3).
@@ -125,9 +128,14 @@ pub fn hevc_nal_type(nal: &[u8]) -> u8 {
 /// - CRA (21): Clean Random Access
 #[inline]
 pub fn is_hevc_keyframe_nal_type(nal_type: u8) -> bool {
-    matches!(nal_type, 
-        nal_type::BLA_W_LP | nal_type::BLA_W_RADL | nal_type::BLA_N_LP |
-        nal_type::IDR_W_RADL | nal_type::IDR_N_LP | nal_type::CRA_NUT
+    matches!(
+        nal_type,
+        nal_type::BLA_W_LP
+            | nal_type::BLA_W_RADL
+            | nal_type::BLA_N_LP
+            | nal_type::IDR_W_RADL
+            | nal_type::IDR_N_LP
+            | nal_type::CRA_NUT
     )
 }
 
@@ -170,16 +178,16 @@ pub fn extract_hevc_config(data: &[u8]) -> Option<HevcConfig> {
         if nal.is_empty() {
             continue;
         }
-        
+
         let nal_type = hevc_nal_type(nal);
-        
+
         match nal_type {
             nal_type::VPS if vps.is_none() => vps = Some(nal),
             nal_type::SPS if sps.is_none() => sps = Some(nal),
             nal_type::PPS if pps.is_none() => pps = Some(nal),
             _ => {}
         }
-        
+
         // Early exit once we have all three
         if vps.is_some() && sps.is_some() && pps.is_some() {
             break;
@@ -198,7 +206,7 @@ pub fn extract_hevc_config(data: &[u8]) -> Option<HevcConfig> {
 /// Same conversion as H.264: replaces start codes with 4-byte NAL lengths.
 pub fn hevc_annexb_to_hvcc(data: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
-    
+
     for nal in AnnexBNalIter::new(data) {
         if nal.is_empty() {
             continue;
@@ -269,9 +277,9 @@ mod tests {
     fn test_extract_hevc_config_success() {
         // Minimal HEVC keyframe with VPS, SPS, PPS
         let data = [
-            0x00, 0x00, 0x00, 0x01, 0x40, 0x01, 0x0c, 0x01,  // VPS (type 32)
-            0x00, 0x00, 0x00, 0x01, 0x42, 0x01, 0x01, 0x21,  // SPS (type 33)
-            0x00, 0x00, 0x00, 0x01, 0x44, 0x01, 0xc0, 0x73,  // PPS (type 34)
+            0x00, 0x00, 0x00, 0x01, 0x40, 0x01, 0x0c, 0x01, // VPS (type 32)
+            0x00, 0x00, 0x00, 0x01, 0x42, 0x01, 0x01, 0x21, // SPS (type 33)
+            0x00, 0x00, 0x00, 0x01, 0x44, 0x01, 0xc0, 0x73, // PPS (type 34)
         ];
 
         let config = extract_hevc_config(&data).unwrap();
@@ -283,8 +291,8 @@ mod tests {
     #[test]
     fn test_extract_hevc_config_missing_vps() {
         let data = [
-            0x00, 0x00, 0x00, 0x01, 0x42, 0x01, 0x01, 0x21,  // SPS only
-            0x00, 0x00, 0x00, 0x01, 0x44, 0x01, 0xc0, 0x73,  // PPS
+            0x00, 0x00, 0x00, 0x01, 0x42, 0x01, 0x01, 0x21, // SPS only
+            0x00, 0x00, 0x00, 0x01, 0x44, 0x01, 0xc0, 0x73, // PPS
         ];
         assert!(extract_hevc_config(&data).is_none());
     }
@@ -292,8 +300,8 @@ mod tests {
     #[test]
     fn test_extract_hevc_config_missing_sps() {
         let data = [
-            0x00, 0x00, 0x00, 0x01, 0x40, 0x01, 0x0c, 0x01,  // VPS only
-            0x00, 0x00, 0x00, 0x01, 0x44, 0x01, 0xc0, 0x73,  // PPS
+            0x00, 0x00, 0x00, 0x01, 0x40, 0x01, 0x0c, 0x01, // VPS only
+            0x00, 0x00, 0x00, 0x01, 0x44, 0x01, 0xc0, 0x73, // PPS
         ];
         assert!(extract_hevc_config(&data).is_none());
     }
@@ -301,8 +309,8 @@ mod tests {
     #[test]
     fn test_extract_hevc_config_missing_pps() {
         let data = [
-            0x00, 0x00, 0x00, 0x01, 0x40, 0x01, 0x0c, 0x01,  // VPS
-            0x00, 0x00, 0x00, 0x01, 0x42, 0x01, 0x01, 0x21,  // SPS only
+            0x00, 0x00, 0x00, 0x01, 0x40, 0x01, 0x0c, 0x01, // VPS
+            0x00, 0x00, 0x00, 0x01, 0x42, 0x01, 0x01, 0x21, // SPS only
         ];
         assert!(extract_hevc_config(&data).is_none());
     }
@@ -310,16 +318,16 @@ mod tests {
     #[test]
     fn test_hevc_annexb_to_hvcc() {
         let annexb = [
-            0x00, 0x00, 0x00, 0x01, 0x40, 0x01, 0x0c,  // VPS (3 bytes)
-            0x00, 0x00, 0x00, 0x01, 0x42, 0x01,        // SPS (2 bytes)
+            0x00, 0x00, 0x00, 0x01, 0x40, 0x01, 0x0c, // VPS (3 bytes)
+            0x00, 0x00, 0x00, 0x01, 0x42, 0x01, // SPS (2 bytes)
         ];
 
         let hvcc = hevc_annexb_to_hvcc(&annexb);
-        
+
         // First NAL: length 3 + data
         assert_eq!(&hvcc[0..4], &[0x00, 0x00, 0x00, 0x03]);
         assert_eq!(&hvcc[4..7], &[0x40, 0x01, 0x0c]);
-        
+
         // Second NAL: length 2 + data
         assert_eq!(&hvcc[7..11], &[0x00, 0x00, 0x00, 0x02]);
         assert_eq!(&hvcc[11..13], &[0x42, 0x01]);
@@ -329,14 +337,14 @@ mod tests {
     fn test_is_hevc_keyframe() {
         // IDR frame
         let idr = [
-            0x00, 0x00, 0x00, 0x01, 0x40, 0x01,  // VPS
-            0x00, 0x00, 0x00, 0x01, 0x26, 0x01,  // IDR_W_RADL (type 19)
+            0x00, 0x00, 0x00, 0x01, 0x40, 0x01, // VPS
+            0x00, 0x00, 0x00, 0x01, 0x26, 0x01, // IDR_W_RADL (type 19)
         ];
         assert!(is_hevc_keyframe(&idr));
 
         // Non-keyframe (TRAIL_R, type 1)
         let trail = [
-            0x00, 0x00, 0x00, 0x01, 0x02, 0x01,  // TRAIL_R (type 1)
+            0x00, 0x00, 0x00, 0x01, 0x02, 0x01, // TRAIL_R (type 1)
         ];
         assert!(!is_hevc_keyframe(&trail));
     }
@@ -346,12 +354,14 @@ mod tests {
         // Create config with realistic SPS header
         // HEVC SPS has profile_tier_level at byte offset 3+
         let config = HevcConfig::new(
-            vec![0x40, 0x01],  // VPS
-            vec![0x42, 0x01, 0x01, 0x21, 0x80, 0x00, 0x00, 0x03,
-                 0x00, 0x00, 0x03, 0x00, 0x00, 0x03, 0x00, 0x5d],  // SPS with level at byte 15
-            vec![0x44, 0x01],  // PPS
+            vec![0x40, 0x01], // VPS
+            vec![
+                0x42, 0x01, 0x01, 0x21, 0x80, 0x00, 0x00, 0x03, 0x00, 0x00, 0x03, 0x00, 0x00, 0x03,
+                0x00, 0x5d,
+            ], // SPS with level at byte 15
+            vec![0x44, 0x01], // PPS
         );
-        
+
         // Profile space is bits 6-7 of byte 3 (0x21 >> 6 = 0)
         assert_eq!(config.general_profile_space(), 0);
         // Tier flag is bit 5 of byte 3 (0x21 >> 5 & 1 = 1)

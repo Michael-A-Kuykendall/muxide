@@ -21,7 +21,7 @@ fn read_hex_fixture(dir: &str, name: &str) -> Vec<u8> {
     out
 }
 
-fn find_box<'a>(haystack: &'a [u8], typ: [u8; 4]) -> Mp4Box {
+fn find_box(haystack: &[u8], typ: [u8; 4]) -> Mp4Box {
     *parse_boxes(haystack)
         .iter()
         .find(|b| b.typ == typ)

@@ -1,13 +1,13 @@
 //! Slice 1: Input contract enforcement tests
-//! 
+//!
 //! These tests verify that Muxide rejects invalid input with descriptive errors
 //! rather than producing corrupt output or panicking.
 
 mod support;
 
 use muxide::api::{AudioCodec, MuxerBuilder, MuxerError, VideoCodec};
-use support::SharedBuffer;
 use std::{fs, path::Path};
+use support::SharedBuffer;
 
 fn read_hex_fixture(dir: &str, name: &str) -> Vec<u8> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -45,15 +45,23 @@ fn video_pts_negative_is_rejected() {
         .unwrap();
 
     let err = muxer.write_video(-0.001, &frame, true).unwrap_err();
-    
-    assert!(matches!(err, MuxerError::NegativeVideoPts { pts, frame_index } 
-        if pts < 0.0 && frame_index == 0));
-    
+
+    assert!(
+        matches!(err, MuxerError::NegativeVideoPts { pts, frame_index } 
+        if pts < 0.0 && frame_index == 0)
+    );
+
     let msg = err.to_string();
-    assert!(msg.contains("-0.001") || msg.contains("negative"), 
-            "Error should mention the negative value: {}", msg);
-    assert!(msg.contains("frame 0"), 
-            "Error should include frame index: {}", msg);
+    assert!(
+        msg.contains("-0.001") || msg.contains("negative"),
+        "Error should mention the negative value: {}",
+        msg
+    );
+    assert!(
+        msg.contains("frame 0"),
+        "Error should include frame index: {}",
+        msg
+    );
 }
 
 #[test]
@@ -67,17 +75,26 @@ fn video_pts_non_increasing_is_rejected() {
 
     muxer.write_video(0.0, &frame, true).unwrap();
     muxer.write_video(0.033, &frame, false).unwrap();
-    
+
     // Same timestamp as previous
     let err = muxer.write_video(0.033, &frame, false).unwrap_err();
-    
-    assert!(matches!(err, MuxerError::NonIncreasingVideoPts { prev_pts, curr_pts, frame_index }
-        if (prev_pts - 0.033).abs() < 0.001 && (curr_pts - 0.033).abs() < 0.001 && frame_index == 2));
-    
+
+    assert!(
+        matches!(err, MuxerError::NonIncreasingVideoPts { prev_pts, curr_pts, frame_index }
+        if (prev_pts - 0.033).abs() < 0.001 && (curr_pts - 0.033).abs() < 0.001 && frame_index == 2)
+    );
+
     let msg = err.to_string();
-    assert!(msg.contains("frame 2"), "Error should include frame index: {}", msg);
-    assert!(msg.contains("increase") || msg.contains("greater"), 
-            "Error should explain timestamps must increase: {}", msg);
+    assert!(
+        msg.contains("frame 2"),
+        "Error should include frame index: {}",
+        msg
+    );
+    assert!(
+        msg.contains("increase") || msg.contains("greater"),
+        "Error should explain timestamps must increase: {}",
+        msg
+    );
 }
 
 #[test]
@@ -91,15 +108,18 @@ fn video_pts_decreasing_is_rejected() {
 
     muxer.write_video(0.0, &frame, true).unwrap();
     muxer.write_video(0.066, &frame, false).unwrap();
-    
+
     // Decreasing timestamp
     let err = muxer.write_video(0.033, &frame, false).unwrap_err();
-    
+
     assert!(matches!(err, MuxerError::NonIncreasingVideoPts { .. }));
-    
+
     let msg = err.to_string();
-    assert!(msg.contains("0.033") || msg.contains("0.066"), 
-            "Error should show the timestamp values: {}", msg);
+    assert!(
+        msg.contains("0.033") || msg.contains("0.066"),
+        "Error should show the timestamp values: {}",
+        msg
+    );
 }
 
 // =============================================================================
@@ -118,16 +138,24 @@ fn dts_non_increasing_is_rejected() {
     // I-frame at DTS=0
     muxer.write_video_with_dts(0.0, 0.0, &frame, true).unwrap();
     // P-frame at DTS=0.033
-    muxer.write_video_with_dts(0.1, 0.033, &frame, false).unwrap();
-    
+    muxer
+        .write_video_with_dts(0.1, 0.033, &frame, false)
+        .unwrap();
+
     // Try to write with DTS <= previous DTS
-    let err = muxer.write_video_with_dts(0.066, 0.033, &frame, false).unwrap_err();
-    
+    let err = muxer
+        .write_video_with_dts(0.066, 0.033, &frame, false)
+        .unwrap_err();
+
     assert!(matches!(err, MuxerError::NonIncreasingDts { .. }));
-    
+
     let msg = err.to_string();
     assert!(msg.contains("DTS"), "Error should mention DTS: {}", msg);
-    assert!(msg.contains("increase"), "Error should explain DTS must increase: {}", msg);
+    assert!(
+        msg.contains("increase"),
+        "Error should explain DTS must increase: {}",
+        msg
+    );
 }
 
 #[test]
@@ -139,8 +167,10 @@ fn dts_negative_is_rejected() {
         .build()
         .unwrap();
 
-    let err = muxer.write_video_with_dts(0.0, -0.001, &frame, true).unwrap_err();
-    
+    let err = muxer
+        .write_video_with_dts(0.0, -0.001, &frame, true)
+        .unwrap_err();
+
     // Negative DTS treated as negative PTS error
     assert!(matches!(err, MuxerError::NegativeVideoPts { .. }));
 }
@@ -160,11 +190,13 @@ fn audio_pts_negative_is_rejected() {
         .unwrap();
 
     muxer.write_video(0.0, &frame, true).unwrap();
-    
+
     let err = muxer.write_audio(-0.001, &valid_adts_frame()).unwrap_err();
-    
-    assert!(matches!(err, MuxerError::NegativeAudioPts { pts, frame_index }
-        if pts < 0.0 && frame_index == 0));
+
+    assert!(
+        matches!(err, MuxerError::NegativeAudioPts { pts, frame_index }
+        if pts < 0.0 && frame_index == 0)
+    );
 }
 
 #[test]
@@ -180,12 +212,14 @@ fn audio_pts_decreasing_is_rejected() {
     muxer.write_video(0.0, &frame, true).unwrap();
     muxer.write_audio(0.0, &valid_adts_frame()).unwrap();
     muxer.write_audio(0.023, &valid_adts_frame()).unwrap();
-    
+
     // Decreasing audio timestamp
     let err = muxer.write_audio(0.010, &valid_adts_frame()).unwrap_err();
-    
-    assert!(matches!(err, MuxerError::DecreasingAudioPts { prev_pts, curr_pts, frame_index }
-        if (prev_pts - 0.023).abs() < 0.001 && (curr_pts - 0.010).abs() < 0.001 && frame_index == 2));
+
+    assert!(
+        matches!(err, MuxerError::DecreasingAudioPts { prev_pts, curr_pts, frame_index }
+        if (prev_pts - 0.023).abs() < 0.001 && (curr_pts - 0.010).abs() < 0.001 && frame_index == 2)
+    );
 }
 
 #[test]
@@ -199,9 +233,15 @@ fn audio_before_first_video_is_rejected() {
 
     // No video written yet
     let err = muxer.write_audio(0.0, &valid_adts_frame()).unwrap_err();
-    
-    assert!(matches!(err, MuxerError::AudioBeforeFirstVideo { first_video_pts: None, .. }));
-    
+
+    assert!(matches!(
+        err,
+        MuxerError::AudioBeforeFirstVideo {
+            first_video_pts: None,
+            ..
+        }
+    ));
+
     let msg = err.to_string();
     assert!(msg.contains("video"), "Error should mention video: {}", msg);
 }
@@ -218,13 +258,17 @@ fn audio_pts_before_first_video_pts_is_rejected() {
 
     // Video starts at 1.0 second
     muxer.write_video(1.0, &frame, true).unwrap();
-    
+
     // Audio at 0.5 seconds (before video)
     let err = muxer.write_audio(0.5, &valid_adts_frame()).unwrap_err();
-    
-    assert!(matches!(err, MuxerError::AudioBeforeFirstVideo { 
-        audio_pts, first_video_pts: Some(video_pts) 
-    } if (audio_pts - 0.5).abs() < 0.001 && (video_pts - 1.0).abs() < 0.001));
+
+    assert!(matches!(
+        err,
+        MuxerError::AudioBeforeFirstVideo {
+            audio_pts,
+            first_video_pts: Some(video_pts)
+        } if (audio_pts - 0.5).abs() < 0.001 && (video_pts - 1.0).abs() < 0.001
+    ));
 }
 
 #[test]
@@ -238,10 +282,13 @@ fn audio_empty_frame_is_rejected() {
         .unwrap();
 
     muxer.write_video(0.0, &frame, true).unwrap();
-    
+
     let err = muxer.write_audio(0.0, &[]).unwrap_err();
-    
-    assert!(matches!(err, MuxerError::EmptyAudioFrame { frame_index: 0 }));
+
+    assert!(matches!(
+        err,
+        MuxerError::EmptyAudioFrame { frame_index: 0 }
+    ));
 }
 
 #[test]
@@ -255,15 +302,20 @@ fn audio_invalid_adts_is_rejected() {
         .unwrap();
 
     muxer.write_video(0.0, &frame, true).unwrap();
-    
+
     // Invalid data (doesn't start with 0xFFF sync word)
-    let err = muxer.write_audio(0.0, &[0x00, 0x01, 0x02, 0x03]).unwrap_err();
-    
+    let err = muxer
+        .write_audio(0.0, &[0x00, 0x01, 0x02, 0x03])
+        .unwrap_err();
+
     assert!(matches!(err, MuxerError::InvalidAdts { frame_index: 0 }));
-    
+
     let msg = err.to_string();
-    assert!(msg.contains("ADTS") || msg.contains("sync"), 
-            "Error should mention ADTS format: {}", msg);
+    assert!(
+        msg.contains("ADTS") || msg.contains("sync"),
+        "Error should mention ADTS format: {}",
+        msg
+    );
 }
 
 // =============================================================================
@@ -280,12 +332,15 @@ fn first_video_frame_must_be_keyframe() {
         .unwrap();
 
     let err = muxer.write_video(0.0, &p_frame, false).unwrap_err();
-    
+
     assert!(matches!(err, MuxerError::FirstVideoFrameMustBeKeyframe));
-    
+
     let msg = err.to_string();
-    assert!(msg.contains("keyframe") || msg.contains("IDR"), 
-            "Error should explain first frame must be keyframe: {}", msg);
+    assert!(
+        msg.contains("keyframe") || msg.contains("IDR"),
+        "Error should explain first frame must be keyframe: {}",
+        msg
+    );
 }
 
 #[test]
@@ -299,12 +354,15 @@ fn first_keyframe_must_contain_sps_pps() {
         .unwrap();
 
     let err = muxer.write_video(0.0, &p_frame, true).unwrap_err();
-    
+
     assert!(matches!(err, MuxerError::FirstVideoFrameMissingSpsPps));
-    
+
     let msg = err.to_string();
-    assert!(msg.contains("SPS") && msg.contains("PPS"), 
-            "Error should mention SPS and PPS: {}", msg);
+    assert!(
+        msg.contains("SPS") && msg.contains("PPS"),
+        "Error should mention SPS and PPS: {}",
+        msg
+    );
 }
 
 // =============================================================================
@@ -315,7 +373,7 @@ fn first_keyframe_must_contain_sps_pps() {
 fn error_messages_are_educational() {
     // All error messages should contain guidance on how to fix the issue
     let frame = read_hex_fixture("video_samples", "frame0_key.264");
-    
+
     // Test NonIncreasingVideoPts suggests write_video_with_dts for B-frames
     {
         let (writer, _) = SharedBuffer::new();
@@ -326,10 +384,13 @@ fn error_messages_are_educational() {
         muxer.write_video(0.0, &frame, true).unwrap();
         let err = muxer.write_video(0.0, &frame, false).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("write_video_with_dts"), 
-                "NonIncreasingVideoPts should suggest write_video_with_dts: {}", msg);
+        assert!(
+            msg.contains("write_video_with_dts"),
+            "NonIncreasingVideoPts should suggest write_video_with_dts: {}",
+            msg
+        );
     }
-    
+
     // Test FirstVideoFrameMissingSpsPps explains what to do
     {
         let p_frame = read_hex_fixture("video_samples", "frame1_p.264");
@@ -340,7 +401,10 @@ fn error_messages_are_educational() {
             .unwrap();
         let err = muxer.write_video(0.0, &p_frame, true).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("prepend") || msg.contains("NAL type"), 
-                "FirstVideoFrameMissingSpsPps should explain how to fix: {}", msg);
+        assert!(
+            msg.contains("prepend") || msg.contains("NAL type"),
+            "FirstVideoFrameMissingSpsPps should explain how to fix: {}",
+            msg
+        );
     }
 }

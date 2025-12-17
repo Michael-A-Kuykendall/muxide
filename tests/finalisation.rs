@@ -22,7 +22,8 @@ fn read_hex_fixture(dir: &str, name: &str) -> Vec<u8> {
 }
 
 #[test]
-fn finish_in_place_errors_on_double_finish_and_blocks_writes() -> Result<(), Box<dyn std::error::Error>> {
+fn finish_in_place_errors_on_double_finish_and_blocks_writes(
+) -> Result<(), Box<dyn std::error::Error>> {
     let frame0 = read_hex_fixture("video_samples", "frame0_key.264");
 
     let (writer, buffer) = SharedBuffer::new();

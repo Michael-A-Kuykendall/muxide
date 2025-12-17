@@ -114,10 +114,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_poisoned_lock_paths_are_handled() {
+        clear_invariant_log();
+
+        let _ = std::panic::catch_unwind(|| {
+            let mut log = invariant_log().write().unwrap();
+            log.insert("poisoned invariant".to_string());
+            panic!("poison the lock");
+        });
+
+        // These calls should use the poisoned.into_inner() paths.
+        contract_test("poisoned", &["poisoned invariant"]);
+
+        let logged = get_logged_invariants();
+        assert!(logged.contains(&"poisoned invariant".to_string()));
+    }
+
+    #[test]
     fn test_invariant_passes() {
         clear_invariant_log();
         assert_invariant!(true, "test invariant passes");
-        
+
         let logged = get_logged_invariants();
         assert!(logged.contains(&"test invariant passes".to_string()));
     }

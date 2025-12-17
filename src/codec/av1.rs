@@ -130,7 +130,7 @@ pub fn obu_has_size(header_byte: u8) -> bool {
 pub fn read_leb128(data: &[u8]) -> Option<(u64, usize)> {
     let mut value: u64 = 0;
     let mut shift = 0;
-    
+
     for (i, &byte) in data.iter().take(8).enumerate() {
         value |= ((byte & 0x7F) as u64) << shift;
         if (byte & 0x80) == 0 {
@@ -165,7 +165,7 @@ pub fn parse_obu_header(data: &[u8]) -> Option<ObuInfo> {
     }
 
     let header_byte = data[0];
-    
+
     // Check forbidden bit (must be 0)
     if (header_byte & 0x80) != 0 {
         return None;
@@ -176,7 +176,7 @@ pub fn parse_obu_header(data: &[u8]) -> Option<ObuInfo> {
     let has_size = obu_has_size(header_byte);
 
     let mut header_size = 1;
-    
+
     // Skip extension byte if present
     if has_extension {
         if data.len() < 2 {
@@ -229,7 +229,7 @@ impl<'a> Iterator for ObuIter<'a> {
 
         let remaining = &self.data[self.pos..];
         let info = parse_obu_header(remaining)?;
-        
+
         if self.pos + info.total_size > self.data.len() {
             return None;
         }
@@ -294,8 +294,8 @@ fn parse_sequence_header(obu_data: &[u8], header_size: usize) -> Option<Av1Confi
         if decoder_model_info_present {
             buffer_delay_length = reader.read_bits(5)? as u8 + 1;
             reader.skip_bits(32)?; // num_units_in_decoding_tick
-            reader.skip_bits(5)?;  // buffer_removal_time_length
-            reader.skip_bits(5)?;  // frame_presentation_time_length
+            reader.skip_bits(5)?; // buffer_removal_time_length
+            reader.skip_bits(5)?; // frame_presentation_time_length
         }
 
         // initial_display_delay_present_flag: 1 bit
@@ -303,10 +303,10 @@ fn parse_sequence_header(obu_data: &[u8], header_size: usize) -> Option<Av1Confi
 
         // operating_points_cnt_minus_1: 5 bits
         let op_cnt = reader.read_bits(5)? as usize + 1;
-        
+
         let mut first_seq_level_idx = 0u8;
         let mut first_seq_tier = 0u8;
-        
+
         for i in 0..op_cnt {
             reader.skip_bits(12)?; // operating_point_idc
             let level_idx = reader.read_bits(5)? as u8;
@@ -347,13 +347,11 @@ fn parse_sequence_header(obu_data: &[u8], header_size: usize) -> Option<Av1Confi
     let _max_height = reader.read_bits(frame_height_bits)? + 1;
 
     // For reduced_still_picture_header, frame_id is not present
-    let mut frame_id_length = 0;
     if !reduced_still_picture_header {
         let frame_id_numbers_present = reader.read_bit()?;
         if frame_id_numbers_present {
             let delta_frame_id_length = reader.read_bits(4)? as usize + 2;
-            frame_id_length = reader.read_bits(3)? as usize + delta_frame_id_length + 1;
-            let _ = frame_id_length; // Used later for frame parsing
+            let _frame_id_length = reader.read_bits(3)? as usize + delta_frame_id_length + 1;
         }
     }
 
@@ -411,7 +409,14 @@ fn parse_sequence_header(obu_data: &[u8], header_size: usize) -> Option<Av1Confi
     reader.read_bit()?;
 
     // color_config
-    let (high_bitdepth, twelve_bit, monochrome, chroma_subsampling_x, chroma_subsampling_y, chroma_sample_position) = parse_color_config(&mut reader, seq_profile)?;
+    let (
+        high_bitdepth,
+        twelve_bit,
+        monochrome,
+        chroma_subsampling_x,
+        chroma_subsampling_y,
+        chroma_sample_position,
+    ) = parse_color_config(&mut reader, seq_profile)?;
 
     // film_grain_params_present: 1 bit
     reader.read_bit()?;
@@ -431,10 +436,13 @@ fn parse_sequence_header(obu_data: &[u8], header_size: usize) -> Option<Av1Confi
 }
 
 /// Parse color_config from sequence header.
-fn parse_color_config(reader: &mut BitReader, seq_profile: u8) -> Option<(bool, bool, bool, bool, bool, u8)> {
+fn parse_color_config(
+    reader: &mut BitReader,
+    seq_profile: u8,
+) -> Option<(bool, bool, bool, bool, bool, u8)> {
     // high_bitdepth: 1 bit
     let high_bitdepth = reader.read_bit()?;
-    
+
     let twelve_bit = if seq_profile == 2 && high_bitdepth {
         reader.read_bit()?
     } else {
@@ -457,16 +465,17 @@ fn parse_color_config(reader: &mut BitReader, seq_profile: u8) -> Option<(bool, 
 
     // color_description_present_flag: 1 bit
     let color_description_present = reader.read_bit()?;
-    let (color_primaries, transfer_characteristics, matrix_coefficients) = if color_description_present {
-        let cp = reader.read_bits(8)? as u8;
-        let tc = reader.read_bits(8)? as u8;
-        let mc = reader.read_bits(8)? as u8;
-        (cp, tc, mc)
-    } else {
-        (2, 2, 2) // Unspecified
-    };
+    let (color_primaries, transfer_characteristics, matrix_coefficients) =
+        if color_description_present {
+            let cp = reader.read_bits(8)? as u8;
+            let tc = reader.read_bits(8)? as u8;
+            let mc = reader.read_bits(8)? as u8;
+            (cp, tc, mc)
+        } else {
+            (2, 2, 2) // Unspecified
+        };
 
-    let (chroma_subsampling_x, chroma_subsampling_y, chroma_sample_position) = if monochrome {
+    let (chroma_subsampling_x, chroma_subsampling_y, _chroma_sample_position) = if monochrome {
         // color_range: 1 bit
         reader.read_bit()?;
         (true, true, 0)
@@ -476,23 +485,21 @@ fn parse_color_config(reader: &mut BitReader, seq_profile: u8) -> Option<(bool, 
     } else {
         // color_range: 1 bit
         reader.read_bit()?;
-        
+
         if seq_profile == 0 {
             (true, true, 0)
         } else if seq_profile == 1 {
             (false, false, 0)
-        } else {
-            if bit_depth == 12 {
-                let subsampling_x = reader.read_bit()?;
-                let subsampling_y = if subsampling_x {
-                    reader.read_bit()?
-                } else {
-                    false
-                };
-                (subsampling_x, subsampling_y, 0)
+        } else if bit_depth == 12 {
+            let subsampling_x = reader.read_bit()?;
+            let subsampling_y = if subsampling_x {
+                reader.read_bit()?
             } else {
-                (true, false, 0)
-            }
+                false
+            };
+            (subsampling_x, subsampling_y, 0)
+        } else {
+            (true, false, 0)
         }
     };
 
@@ -507,7 +514,14 @@ fn parse_color_config(reader: &mut BitReader, seq_profile: u8) -> Option<(bool, 
         reader.read_bit()?;
     }
 
-    Some((high_bitdepth, twelve_bit, monochrome, chroma_subsampling_x, chroma_subsampling_y, chroma_sample_position))
+    Some((
+        high_bitdepth,
+        twelve_bit,
+        monochrome,
+        chroma_subsampling_x,
+        chroma_subsampling_y,
+        chroma_sample_position,
+    ))
 }
 
 /// Skip a uvlc (unsigned variable length code) value.
@@ -608,6 +622,32 @@ pub fn is_av1_keyframe(data: &[u8]) -> bool {
 mod tests {
     use super::*;
 
+    fn bits_to_bytes(bits: &str) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut acc = 0u8;
+        let mut n = 0;
+        for ch in bits.chars() {
+            if ch != '0' && ch != '1' {
+                continue;
+            }
+            acc <<= 1;
+            if ch == '1' {
+                acc |= 1;
+            }
+            n += 1;
+            if n == 8 {
+                out.push(acc);
+                acc = 0;
+                n = 0;
+            }
+        }
+        if n != 0 {
+            acc <<= 8 - n;
+            out.push(acc);
+        }
+        out
+    }
+
     #[test]
     fn test_obu_type_extraction() {
         // OBU type 1 (Sequence Header): (1 << 3) = 8 = 0x08
@@ -636,13 +676,13 @@ mod tests {
     fn test_read_leb128() {
         // Single byte: 0x00 = 0
         assert_eq!(read_leb128(&[0x00]), Some((0, 1)));
-        
+
         // Single byte: 0x7F = 127
         assert_eq!(read_leb128(&[0x7F]), Some((127, 1)));
-        
+
         // Two bytes: 0x80 0x01 = 128
         assert_eq!(read_leb128(&[0x80, 0x01]), Some((128, 2)));
-        
+
         // Two bytes: 0xFF 0x01 = 255
         assert_eq!(read_leb128(&[0xFF, 0x01]), Some((255, 2)));
     }
@@ -656,7 +696,7 @@ mod tests {
         let info = parse_obu_header(&data).unwrap();
         assert_eq!(info.obu_type, 1);
         assert!(!info.has_extension);
-        assert_eq!(info.header_size, 2);  // 1 byte header + 1 byte size
+        assert_eq!(info.header_size, 2); // 1 byte header + 1 byte size
         assert_eq!(info.payload_size, 5);
         assert_eq!(info.total_size, 7);
     }
@@ -668,7 +708,7 @@ mod tests {
         // SH: 0x0A (type=1, has_size=1), 0x03 (size=3), 0xAA, 0xBB, 0xCC
         let data = [0x12, 0x00, 0x0A, 0x03, 0xAA, 0xBB, 0xCC];
         let obus: Vec<_> = ObuIter::new(&data).collect();
-        
+
         assert_eq!(obus.len(), 2);
         assert_eq!(obus[0].0.obu_type, 2); // Temporal Delimiter
         assert_eq!(obus[1].0.obu_type, 1); // Sequence Header
@@ -692,6 +732,111 @@ mod tests {
     }
 
     #[test]
+    fn test_is_av1_keyframe_skips_show_existing_frame() {
+        // Frame Header OBU with show_existing_frame=1 (not a new keyframe),
+        // followed by a Frame Header OBU with show_existing_frame=0 and keyframe type.
+        // Header byte: type=3 (FRAME_HEADER) with has_size=1 => (3<<3)|0x02 = 0x1A.
+        let show_existing = [0x1A, 0x02, 0x80, 0x00];
+        let keyframe = [0x1A, 0x02, 0x00, 0x00];
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&show_existing);
+        stream.extend_from_slice(&keyframe);
+
+        assert!(is_av1_keyframe(&stream));
+    }
+
+    #[test]
+    fn test_av1_config_default_values() {
+        let cfg = Av1Config::default();
+        assert!(cfg.sequence_header.is_empty());
+        assert_eq!(cfg.seq_profile, 0);
+        assert_eq!(cfg.seq_level_idx, 0);
+        assert_eq!(cfg.seq_tier, 0);
+        assert!(!cfg.high_bitdepth);
+        assert!(!cfg.twelve_bit);
+        assert!(!cfg.monochrome);
+        assert!(cfg.chroma_subsampling_x);
+        assert!(cfg.chroma_subsampling_y);
+        assert_eq!(cfg.chroma_sample_position, 0);
+    }
+
+    #[test]
+    fn test_read_leb128_rejects_overlong_encoding() {
+        // 8 bytes with continuation bit set should be rejected (no terminator within 8).
+        let bytes = [0x80u8; 8];
+        assert!(read_leb128(&bytes).is_none());
+    }
+
+    #[test]
+    fn test_parse_obu_header_rejects_forbidden_bit() {
+        // forbidden bit is MSB, must be 0.
+        assert!(parse_obu_header(&[0x80]).is_none());
+    }
+
+    #[test]
+    fn test_parse_obu_header_extension_requires_second_byte() {
+        // has_extension=1 but missing extension byte.
+        // type=1, extension=1 => (1<<3)|0x04 = 0x0C
+        assert!(parse_obu_header(&[0x0C]).is_none());
+    }
+
+    #[test]
+    fn test_parse_obu_header_size_requires_bytes() {
+        // has_size=1 but no bytes to read size from.
+        // type=1, has_size=1 => (1<<3)|0x02 = 0x0A
+        assert!(parse_obu_header(&[0x0A]).is_none());
+
+        // header byte + size byte present: parse succeeds and reports total_size.
+        let info = parse_obu_header(&[0x0A, 0x01]).expect("OBU header should parse");
+        assert_eq!(info.header_size, 2);
+        assert_eq!(info.payload_size, 1);
+        assert_eq!(info.total_size, 3);
+    }
+
+    #[test]
+    fn test_bit_reader_read_bits_over_64_returns_none() {
+        let data = [0u8; 16];
+        let mut reader = BitReader::new(&data);
+        assert!(reader.read_bits(65).is_none());
+    }
+
+    #[test]
+    fn test_skip_uvlc_rejects_too_many_leading_zeros() {
+        // Provide > 32 leading zeros with no terminating '1' bit.
+        let data = [0u8; 8]; // 64 zero bits
+        let mut reader = BitReader::new(&data);
+        assert!(skip_uvlc(&mut reader).is_none());
+    }
+
+    #[test]
+    fn test_parse_color_config_monochrome_twelve_bit_path() {
+        // seq_profile=2, high_bitdepth=1, twelve_bit=1, monochrome=1,
+        // color_description_present=0, color_range=1, chroma_sample_position=01.
+        let bytes = bits_to_bytes("1 1 1 0 1 01");
+        let mut reader = BitReader::new(&bytes);
+        let parsed = parse_color_config(&mut reader, 2).unwrap();
+        assert!(parsed.0); // high_bitdepth
+        assert!(parsed.1); // twelve_bit
+        assert!(parsed.2); // monochrome
+        assert!(parsed.3); // chroma_subsampling_x
+        assert!(parsed.4); // chroma_subsampling_y
+        assert_eq!(parsed.5, 1); // chroma_sample_position
+    }
+
+    #[test]
+    fn test_parse_color_config_srgb_path() {
+        // sRGB/sYCC path: monochrome=0, color_description_present=1,
+        // cp=1, tc=13, mc=0 => (false,false,0) subsampling and chroma_sample_position=0.
+        let bytes = bits_to_bytes("0 0 1 00000001 00001101 00000000 0");
+        let mut reader = BitReader::new(&bytes);
+        let parsed = parse_color_config(&mut reader, 0).unwrap();
+        assert!(!parsed.2); // monochrome
+        assert!(!parsed.3); // chroma_subsampling_x
+        assert!(!parsed.4); // chroma_subsampling_y
+        assert_eq!(parsed.5, 0); // chroma_sample_position
+    }
+
+    #[test]
     fn test_extract_av1_config_empty() {
         assert!(extract_av1_config(&[]).is_none());
     }
@@ -700,7 +845,7 @@ mod tests {
     fn test_bit_reader() {
         let data = [0b10110100, 0b01100011];
         let mut reader = BitReader::new(&data);
-        
+
         // Read first 4 bits: 1011 = 11
         assert_eq!(reader.read_bits(4), Some(11));
         // Read next 4 bits: 0100 = 4

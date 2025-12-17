@@ -21,7 +21,7 @@ fn read_hex_fixture(name: &str) -> Vec<u8> {
     out
 }
 
-fn find_box<'a>(haystack: &'a [u8], typ: [u8; 4]) -> Mp4Box {
+fn find_box(haystack: &[u8], typ: [u8; 4]) -> Mp4Box {
     *parse_boxes(haystack)
         .iter()
         .find(|b| b.typ == typ)
@@ -59,7 +59,8 @@ fn extract_avcc_payload(produced: &[u8]) -> Vec<u8> {
         .position(|window| window == b"avcC")
         .expect("avcC box must exist in avc1");
     let size_start = avc_c_index - 4;
-    let avc_c_size = u32::from_be_bytes(avc1_payload[size_start..size_start + 4].try_into().unwrap()) as usize;
+    let avc_c_size =
+        u32::from_be_bytes(avc1_payload[size_start..size_start + 4].try_into().unwrap()) as usize;
     avc1_payload[size_start + 8..size_start + avc_c_size].to_vec()
 }
 
@@ -83,8 +84,12 @@ fn avcc_uses_sps_pps_from_first_keyframe() -> Result<(), Box<dyn std::error::Err
     let expected_compat = 0x00;
     let expected_level = 0x28;
 
-    assert!(avcc_payload.windows(6).any(|w| w == [0x67, 0x4d, 0x00, 0x28, 0xaa, 0xbb]));
-    assert!(avcc_payload.windows(4).any(|w| w == [0x68, 0xee, 0x06, 0xf2]));
+    assert!(avcc_payload
+        .windows(6)
+        .any(|w| w == [0x67, 0x4d, 0x00, 0x28, 0xaa, 0xbb]));
+    assert!(avcc_payload
+        .windows(4)
+        .any(|w| w == [0x68, 0xee, 0x06, 0xf2]));
 
     // avcC header bytes must match SPS profile/compat/level.
     assert!(avcc_payload.len() >= 4);

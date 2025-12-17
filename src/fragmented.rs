@@ -105,7 +105,7 @@ impl FragmentedMuxer {
         }
 
         let mut buf = Vec::new();
-        
+
         // ftyp box
         let ftyp = build_ftyp_fmp4();
         buf.extend_from_slice(&ftyp);
@@ -119,7 +119,7 @@ impl FragmentedMuxer {
     }
 
     /// Queue a video sample for the current fragment.
-    /// 
+    ///
     /// - `pts`: Presentation timestamp in timescale units
     /// - `dts`: Decode timestamp in timescale units
     /// - `data`: Sample data in AVCC format (4-byte length prefixed)
@@ -168,7 +168,7 @@ impl FragmentedMuxer {
         if self.samples.is_empty() {
             return false;
         }
-        
+
         if self.samples.len() < 2 {
             return false;
         }
@@ -177,7 +177,7 @@ impl FragmentedMuxer {
         let last_dts = self.samples.last().unwrap().dts;
         let duration_ticks = last_dts - first_dts;
         let duration_ms = duration_ticks * 1000 / self.config.timescale as u64;
-        
+
         duration_ms >= self.config.fragment_duration_ms as u64
     }
 
@@ -208,9 +208,9 @@ fn build_box(typ: &[u8; 4], payload: &[u8]) -> Vec<u8> {
 
 fn build_ftyp_fmp4() -> Vec<u8> {
     let mut payload = Vec::new();
-    payload.extend_from_slice(b"iso5");  // Major brand: ISO Base Media File Format v5
+    payload.extend_from_slice(b"iso5"); // Major brand: ISO Base Media File Format v5
     payload.extend_from_slice(&0u32.to_be_bytes()); // Minor version
-    payload.extend_from_slice(b"iso5");  // Compatible brands
+    payload.extend_from_slice(b"iso5"); // Compatible brands
     payload.extend_from_slice(b"iso6");
     payload.extend_from_slice(b"mp41");
     build_box(b"ftyp", &payload)
@@ -218,19 +218,19 @@ fn build_ftyp_fmp4() -> Vec<u8> {
 
 fn build_moov_fmp4(config: &FragmentConfig) -> Vec<u8> {
     let mut payload = Vec::new();
-    
+
     // mvhd (movie header)
     let mvhd = build_mvhd_fmp4(config.timescale);
     payload.extend_from_slice(&mvhd);
-    
+
     // mvex (movie extends) - required for fragmented MP4
     let mvex = build_mvex();
     payload.extend_from_slice(&mvex);
-    
+
     // trak (video track)
     let trak = build_trak_fmp4(config);
     payload.extend_from_slice(&trak);
-    
+
     build_box(b"moov", &payload)
 }
 
@@ -244,7 +244,7 @@ fn build_mvhd_fmp4(timescale: u32) -> Vec<u8> {
     payload.extend_from_slice(&0x0001_0000_u32.to_be_bytes()); // Rate (1.0)
     payload.extend_from_slice(&0x0100_u16.to_be_bytes()); // Volume (1.0)
     payload.extend_from_slice(&[0u8; 10]); // Reserved
-    // Unity matrix (36 bytes)
+                                           // Unity matrix (36 bytes)
     payload.extend_from_slice(&0x0001_0000_u32.to_be_bytes());
     payload.extend_from_slice(&[0u8; 12]);
     payload.extend_from_slice(&0x0001_0000_u32.to_be_bytes());
@@ -265,21 +265,21 @@ fn build_mvex() -> Vec<u8> {
     trex_payload.extend_from_slice(&0u32.to_be_bytes()); // Default sample size
     trex_payload.extend_from_slice(&0u32.to_be_bytes()); // Default sample flags
     let trex = build_box(b"trex", &trex_payload);
-    
+
     build_box(b"mvex", &trex)
 }
 
 fn build_trak_fmp4(config: &FragmentConfig) -> Vec<u8> {
     let mut payload = Vec::new();
-    
+
     // tkhd (track header)
     let tkhd = build_tkhd_fmp4(config);
     payload.extend_from_slice(&tkhd);
-    
+
     // mdia (media)
     let mdia = build_mdia_fmp4(config);
     payload.extend_from_slice(&mdia);
-    
+
     build_box(b"trak", &payload)
 }
 
@@ -296,33 +296,33 @@ fn build_tkhd_fmp4(config: &FragmentConfig) -> Vec<u8> {
     payload.extend_from_slice(&0u16.to_be_bytes()); // Alternate group
     payload.extend_from_slice(&0u16.to_be_bytes()); // Volume (0 for video)
     payload.extend_from_slice(&0u16.to_be_bytes()); // Reserved
-    // Unity matrix (36 bytes)
+                                                    // Unity matrix (36 bytes)
     payload.extend_from_slice(&0x0001_0000_u32.to_be_bytes());
     payload.extend_from_slice(&[0u8; 12]);
     payload.extend_from_slice(&0x0001_0000_u32.to_be_bytes());
     payload.extend_from_slice(&[0u8; 12]);
     payload.extend_from_slice(&0x4000_0000_u32.to_be_bytes());
     // Width and height in fixed-point 16.16
-    payload.extend_from_slice(&((config.width as u32) << 16).to_be_bytes());
-    payload.extend_from_slice(&((config.height as u32) << 16).to_be_bytes());
+    payload.extend_from_slice(&((config.width) << 16).to_be_bytes());
+    payload.extend_from_slice(&((config.height) << 16).to_be_bytes());
     build_box(b"tkhd", &payload)
 }
 
 fn build_mdia_fmp4(config: &FragmentConfig) -> Vec<u8> {
     let mut payload = Vec::new();
-    
+
     // mdhd (media header)
     let mdhd = build_mdhd_fmp4(config.timescale);
     payload.extend_from_slice(&mdhd);
-    
+
     // hdlr (handler)
     let hdlr = build_hdlr_video();
     payload.extend_from_slice(&hdlr);
-    
+
     // minf (media info)
     let minf = build_minf_fmp4(config);
     payload.extend_from_slice(&minf);
-    
+
     build_box(b"mdia", &payload)
 }
 
@@ -350,19 +350,19 @@ fn build_hdlr_video() -> Vec<u8> {
 
 fn build_minf_fmp4(config: &FragmentConfig) -> Vec<u8> {
     let mut payload = Vec::new();
-    
+
     // vmhd (video media header)
     let vmhd = build_vmhd();
     payload.extend_from_slice(&vmhd);
-    
+
     // dinf (data information)
     let dinf = build_dinf();
     payload.extend_from_slice(&dinf);
-    
+
     // stbl (sample table) - minimal for fMP4
     let stbl = build_stbl_fmp4(config);
     payload.extend_from_slice(&stbl);
-    
+
     build_box(b"minf", &payload)
 }
 
@@ -378,44 +378,44 @@ fn build_dinf() -> Vec<u8> {
     let mut dref_payload = Vec::new();
     dref_payload.extend_from_slice(&0u32.to_be_bytes()); // Version + flags
     dref_payload.extend_from_slice(&1u32.to_be_bytes()); // Entry count
-    // url box (self-contained)
+                                                         // url box (self-contained)
     let url_payload = [0x00, 0x00, 0x00, 0x01]; // Flags: self-contained
     let url_box = build_box(b"url ", &url_payload);
     dref_payload.extend_from_slice(&url_box);
     let dref = build_box(b"dref", &dref_payload);
-    
+
     build_box(b"dinf", &dref)
 }
 
 fn build_stbl_fmp4(config: &FragmentConfig) -> Vec<u8> {
     let mut payload = Vec::new();
-    
+
     // stsd (sample description)
     let stsd = build_stsd_fmp4(config);
     payload.extend_from_slice(&stsd);
-    
+
     // Empty stts (time-to-sample) - actual data in moof
     let stts = build_empty_stts();
     payload.extend_from_slice(&stts);
-    
+
     // Empty stsc (sample-to-chunk)
     let stsc = build_empty_stsc();
     payload.extend_from_slice(&stsc);
-    
+
     // Empty stsz (sample size)
     let stsz = build_empty_stsz();
     payload.extend_from_slice(&stsz);
-    
+
     // Empty stco (chunk offset)
     let stco = build_empty_stco();
     payload.extend_from_slice(&stco);
-    
+
     build_box(b"stbl", &payload)
 }
 
 fn build_stsd_fmp4(config: &FragmentConfig) -> Vec<u8> {
     let avc1 = build_avc1_fmp4(config);
-    
+
     let mut payload = Vec::new();
     payload.extend_from_slice(&0u32.to_be_bytes()); // Version + flags
     payload.extend_from_slice(&1u32.to_be_bytes()); // Entry count
@@ -439,22 +439,23 @@ fn build_avc1_fmp4(config: &FragmentConfig) -> Vec<u8> {
     payload.extend_from_slice(&[0u8; 32]); // Compressor name
     payload.extend_from_slice(&0x0018_u16.to_be_bytes()); // Depth: 24-bit color
     payload.extend_from_slice(&0xffff_u16.to_be_bytes()); // Pre-defined (-1)
-    
+
     // avcC (AVC Configuration)
     let avcc = build_avcc_fmp4(config);
     payload.extend_from_slice(&avcc);
-    
+
     build_box(b"avc1", &payload)
 }
 
 fn build_avcc_fmp4(config: &FragmentConfig) -> Vec<u8> {
-    let mut payload = Vec::new();
-    payload.push(1); // Configuration version
-    payload.push(config.sps.get(1).copied().unwrap_or(0x42)); // Profile
-    payload.push(config.sps.get(2).copied().unwrap_or(0x00)); // Profile compatibility
-    payload.push(config.sps.get(3).copied().unwrap_or(0x1e)); // Level
-    payload.push(0xff); // 6 bits reserved + 2 bits NAL unit length - 1 (3 = 4 bytes)
-    payload.push(0xe1); // 3 bits reserved + 5 bits number of SPS
+    let mut payload = vec![
+        1,                                          // Configuration version
+        config.sps.get(1).copied().unwrap_or(0x42), // Profile
+        config.sps.get(2).copied().unwrap_or(0x00), // Profile compatibility
+        config.sps.get(3).copied().unwrap_or(0x1e), // Level
+        0xff, // 6 bits reserved + 2 bits NAL unit length - 1 (3 = 4 bytes)
+        0xe1, // 3 bits reserved + 5 bits number of SPS
+    ];
     payload.extend_from_slice(&(config.sps.len() as u16).to_be_bytes());
     payload.extend_from_slice(&config.sps);
     payload.push(1); // Number of PPS
@@ -500,35 +501,40 @@ fn build_media_segment(
     samples: &[FragmentSample],
     sequence_number: u32,
     base_media_decode_time: u64,
-    _timescale: u32,  // Reserved for future use (duration calculations)
+    _timescale: u32, // Reserved for future use (duration calculations)
 ) -> Vec<u8> {
     // Calculate total mdat size
     let mdat_payload_size: usize = samples.iter().map(|s| s.data.len()).sum();
-    
+
     // Build moof first to get its size
     let moof = build_moof(samples, sequence_number, base_media_decode_time);
     let moof_size = moof.len() as u32;
-    
+
     // Data offset is moof_size + mdat_header(8)
     let data_offset = moof_size + 8;
-    
+
     // Rebuild moof with correct data offset
-    let moof = build_moof_with_offset(samples, sequence_number, base_media_decode_time, data_offset);
-    
+    let moof = build_moof_with_offset(
+        samples,
+        sequence_number,
+        base_media_decode_time,
+        data_offset,
+    );
+
     // Build mdat
     let mut segment = Vec::with_capacity(moof.len() + 8 + mdat_payload_size);
     segment.extend_from_slice(&moof);
-    
+
     // mdat header
     let mdat_size = (8 + mdat_payload_size) as u32;
     segment.extend_from_slice(&mdat_size.to_be_bytes());
     segment.extend_from_slice(b"mdat");
-    
+
     // mdat payload (all sample data)
     for sample in samples {
         segment.extend_from_slice(&sample.data);
     }
-    
+
     segment
 }
 
@@ -547,15 +553,15 @@ fn build_moof_with_offset(
     data_offset: u32,
 ) -> Vec<u8> {
     let mut payload = Vec::new();
-    
+
     // mfhd (movie fragment header)
     let mfhd = build_mfhd(sequence_number);
     payload.extend_from_slice(&mfhd);
-    
+
     // traf (track fragment)
     let traf = build_traf(samples, base_media_decode_time, data_offset);
     payload.extend_from_slice(&traf);
-    
+
     build_box(b"moof", &payload)
 }
 
@@ -572,19 +578,19 @@ fn build_traf(
     data_offset: u32,
 ) -> Vec<u8> {
     let mut payload = Vec::new();
-    
+
     // tfhd (track fragment header)
     let tfhd = build_tfhd();
     payload.extend_from_slice(&tfhd);
-    
+
     // tfdt (track fragment decode time)
     let tfdt = build_tfdt(base_media_decode_time);
     payload.extend_from_slice(&tfdt);
-    
+
     // trun (track run)
     let trun = build_trun(samples, data_offset);
     payload.extend_from_slice(&trun);
-    
+
     build_box(b"traf", &payload)
 }
 
@@ -612,13 +618,13 @@ fn build_trun(samples: &[FragmentSample], data_offset: u32) -> Vec<u8> {
     // 0x000400 = sample-flags-present
     // 0x000800 = sample-composition-time-offset-present
     let flags: u32 = 0x000001 | 0x000100 | 0x000200 | 0x000400 | 0x000800;
-    
+
     let mut payload = Vec::new();
     // Version 1 for signed composition time offsets
     payload.extend_from_slice(&(0x0100_0000 | flags).to_be_bytes());
     payload.extend_from_slice(&(samples.len() as u32).to_be_bytes()); // Sample count
     payload.extend_from_slice(&data_offset.to_be_bytes()); // Data offset
-    
+
     // Per-sample data
     for (i, sample) in samples.iter().enumerate() {
         // Sample duration (estimate from DTS delta)
@@ -631,10 +637,10 @@ fn build_trun(samples: &[FragmentSample], data_offset: u32) -> Vec<u8> {
             3000 // Default: 1 frame at 30fps
         };
         payload.extend_from_slice(&duration.to_be_bytes());
-        
+
         // Sample size
         payload.extend_from_slice(&(sample.data.len() as u32).to_be_bytes());
-        
+
         // Sample flags
         // Bits 24-25: depends_on (2 = no other samples)
         // Bit 16: is_non_sync_sample
@@ -644,12 +650,12 @@ fn build_trun(samples: &[FragmentSample], data_offset: u32) -> Vec<u8> {
             0x0101_0000_u32 // depends_on = 1, is_non_sync = 1
         };
         payload.extend_from_slice(&flags.to_be_bytes());
-        
+
         // Composition time offset (signed, pts - dts)
         let cts = (sample.pts as i64 - sample.dts as i64) as i32;
         payload.extend_from_slice(&cts.to_be_bytes());
     }
-    
+
     build_box(b"trun", &payload)
 }
 
@@ -657,38 +663,120 @@ fn build_trun(samples: &[FragmentSample], data_offset: u32) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    fn find_box_offset(data: &[u8], typ: &[u8; 4]) -> Option<usize> {
+        data.windows(4)
+            .position(|w| w == typ)
+            .and_then(|pos| pos.checked_sub(4))
+    }
+
+    fn read_u32_be(data: &[u8], offset: usize) -> u32 {
+        u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap())
+    }
+
+    fn read_u64_be(data: &[u8], offset: usize) -> u64 {
+        u64::from_be_bytes(data[offset..offset + 8].try_into().unwrap())
+    }
+
     #[test]
     fn init_segment_contains_ftyp_moov() {
         let config = FragmentConfig::default();
         let mut muxer = FragmentedMuxer::new(config);
         let init = muxer.init_segment();
-        
+
         // Check ftyp
         assert_eq!(&init[4..8], b"ftyp");
-        
+
         // Find moov
         let ftyp_size = u32::from_be_bytes(init[0..4].try_into().unwrap()) as usize;
         assert_eq!(&init[ftyp_size + 4..ftyp_size + 8], b"moov");
     }
 
     #[test]
+    fn init_segment_is_cached_after_first_call() {
+        let config = FragmentConfig::default();
+        let mut muxer = FragmentedMuxer::new(config);
+        let init1 = muxer.init_segment();
+        let init2 = muxer.init_segment();
+        assert_eq!(init1, init2);
+    }
+
+    #[test]
     fn media_segment_contains_moof_mdat() {
         let config = FragmentConfig::default();
         let mut muxer = FragmentedMuxer::new(config);
-        
+
         // Write some samples
         let sample_data = vec![0x00, 0x00, 0x00, 0x05, 0x65, 0xaa, 0xbb, 0xcc, 0xdd];
         muxer.write_video(0, 0, &sample_data, true);
         muxer.write_video(3000, 3000, &sample_data, false);
-        
+
         let segment = muxer.flush_segment().unwrap();
-        
+
         // Check moof
         assert_eq!(&segment[4..8], b"moof");
-        
+
         // Find mdat
         let moof_size = u32::from_be_bytes(segment[0..4].try_into().unwrap()) as usize;
         assert_eq!(&segment[moof_size + 4..moof_size + 8], b"mdat");
+    }
+
+    #[test]
+    fn ready_to_flush_tracks_sample_count_and_duration() {
+        let config = FragmentConfig {
+            fragment_duration_ms: 1,
+            ..Default::default()
+        };
+        let mut muxer = FragmentedMuxer::new(config);
+
+        assert!(!muxer.ready_to_flush(), "empty should not be ready");
+
+        let sample_data = vec![0, 0, 0, 5, 0x65, 1, 2, 3, 4];
+        muxer.write_video(0, 0, &sample_data, true);
+        assert!(!muxer.ready_to_flush(), "single sample should not be ready");
+
+        // 1ms at 90kHz timescale is 90 ticks.
+        muxer.write_video(90, 90, &sample_data, false);
+        assert!(
+            muxer.ready_to_flush(),
+            "two samples reaching duration should be ready"
+        );
+    }
+
+    #[test]
+    fn tfdt_base_decode_time_advances_between_segments() {
+        let config = FragmentConfig::default();
+        let mut muxer = FragmentedMuxer::new(config);
+
+        let sample_data = vec![0, 0, 0, 5, 0x65, 1, 2, 3, 4];
+        muxer.write_video(0, 0, &sample_data, true);
+        muxer.write_video(3000, 3000, &sample_data, false);
+        let _seg1 = muxer.flush_segment().unwrap();
+
+        // base_media_decode_time should now be last.dts + avg_duration = 3000 + 3000 = 6000.
+        muxer.write_video(6000, 6000, &sample_data, true);
+        let seg2 = muxer.flush_segment().unwrap();
+
+        let tfdt_off = find_box_offset(&seg2, b"tfdt").expect("tfdt box");
+        let tfdt_size = read_u32_be(&seg2, tfdt_off) as usize;
+        assert!(tfdt_size >= 8 + 12);
+        // payload: version+flags (4), baseMediaDecodeTime (8)
+        let base = read_u64_be(&seg2, tfdt_off + 8 + 4);
+        assert_eq!(base, 6000);
+    }
+
+    #[test]
+    fn trun_single_sample_uses_default_duration_3000() {
+        let config = FragmentConfig::default();
+        let mut muxer = FragmentedMuxer::new(config);
+
+        let sample_data = vec![0, 0, 0, 5, 0x65, 1, 2, 3, 4];
+        muxer.write_video(0, 0, &sample_data, true);
+        let seg = muxer.flush_segment().unwrap();
+
+        let trun_off = find_box_offset(&seg, b"trun").expect("trun box");
+        // payload begins after header (8): version+flags(4), sample_count(4), data_offset(4), then sample_duration(4)
+        let duration = read_u32_be(&seg, trun_off + 8 + 12);
+        assert_eq!(duration, 3000);
     }
 
     #[test]

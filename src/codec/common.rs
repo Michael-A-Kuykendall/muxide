@@ -44,13 +44,13 @@ impl<'a> Iterator for AnnexBNalIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let (start_code_pos, start_code_len) = find_start_code(self.data, self.cursor)?;
         let nal_start = start_code_pos + start_code_len;
-        
+
         // Find the next start code (or end of data)
         let nal_end = match find_start_code(self.data, nal_start) {
             Some((next_pos, _)) => next_pos,
             None => self.data.len(),
         };
-        
+
         self.cursor = nal_end;
         Some(&self.data[nal_start..nal_end])
     }
@@ -129,9 +129,9 @@ mod tests {
     #[test]
     fn test_annexb_iter_multiple_nals() {
         let data = [
-            0x00, 0x00, 0x00, 0x01, 0x67, 0x42,  // SPS (type 7)
-            0x00, 0x00, 0x00, 0x01, 0x68, 0xCE,  // PPS (type 8)
-            0x00, 0x00, 0x00, 0x01, 0x65, 0x88,  // IDR (type 5)
+            0x00, 0x00, 0x00, 0x01, 0x67, 0x42, // SPS (type 7)
+            0x00, 0x00, 0x00, 0x01, 0x68, 0xCE, // PPS (type 8)
+            0x00, 0x00, 0x00, 0x01, 0x65, 0x88, // IDR (type 5)
         ];
 
         let nals: Vec<_> = AnnexBNalIter::new(&data).collect();
@@ -159,8 +159,8 @@ mod tests {
     fn test_annexb_iter_mixed_start_codes() {
         // Mix of 3-byte and 4-byte start codes
         let data = [
-            0x00, 0x00, 0x00, 0x01, 0x67, 0x42,  // 4-byte
-            0x00, 0x00, 0x01, 0x68, 0xCE,        // 3-byte
+            0x00, 0x00, 0x00, 0x01, 0x67, 0x42, // 4-byte
+            0x00, 0x00, 0x01, 0x68, 0xCE, // 3-byte
         ];
 
         let nals: Vec<_> = AnnexBNalIter::new(&data).collect();

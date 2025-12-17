@@ -19,13 +19,13 @@
 //!
 //! The muxer internally converts to length-prefixed format (AVCC/HVCC) for MP4.
 
+pub mod av1;
 pub mod common;
 pub mod h264;
 pub mod h265;
-pub mod av1;
 pub mod opus;
 
 pub use common::{find_start_code, AnnexBNalIter};
-pub use h264::{AvcConfig, extract_avc_config, annexb_to_avcc, is_h264_keyframe};
-pub use h265::{HevcConfig, extract_hevc_config, hevc_annexb_to_hvcc, is_hevc_keyframe};
-pub use opus::{OpusConfig, opus_packet_samples, is_valid_opus_packet, OPUS_SAMPLE_RATE};
+pub use h264::{annexb_to_avcc, extract_avc_config, is_h264_keyframe, AvcConfig};
+pub use h265::{extract_hevc_config, hevc_annexb_to_hvcc, is_hevc_keyframe, HevcConfig};
+pub use opus::{is_valid_opus_packet, opus_packet_samples, OpusConfig, OPUS_SAMPLE_RATE};
