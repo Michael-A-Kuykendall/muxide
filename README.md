@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/muxide-logo.png" alt="Muxide" width="350"><br>
+  <img src="https://raw.githubusercontent.com/Michael-A-Kuykendall/muxide/main/assets/muxide-logo.png" alt="Muxide" width="350"><br>
   <em>Zero-dependency pure-Rust MP4 muxer for recording applications.</em><br>
   <a href="https://crates.io/crates/muxide"><img src="https://img.shields.io/crates/v/muxide.svg" alt="Crates.io"></a>
   <a href="https://docs.rs/muxide"><img src="https://docs.rs/muxide/badge.svg" alt="Documentation"></a>
