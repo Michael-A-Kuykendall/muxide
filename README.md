@@ -3,7 +3,7 @@
   <em>Zero-dependency pure-Rust MP4 muxer for recording applications.</em><br>
   <a href="https://crates.io/crates/muxide"><img src="https://img.shields.io/crates/v/muxide.svg" alt="Crates.io"></a>
   <a href="https://docs.rs/muxide"><img src="https://docs.rs/muxide/badge.svg" alt="Documentation"></a>
-  <a href="LICENSE-MIT"><img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg" alt="License"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/MSRV-1.70-blue.svg" alt="MSRV"></a>
   <a href="https://github.com/Michael-A-Kuykendall/muxide/actions"><img src="https://github.com/Michael-A-Kuykendall/muxide/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
@@ -64,7 +64,7 @@ If the input violates the contract, Muxide fails fast with explicit errors.
 - ✅ **Pure Rust** (no unsafe, no FFI)
 - ✅ **Thread-safe** (`Send + Sync` when writer is)
 - ✅ **Extensive test suite** (unit, integration, and property tests)
-- ✅ **MIT OR Apache-2.0** (no GPL)
+- ✅ **MIT** (no GPL)
 
 > **Note:** `no_std` is not supported. Muxide requires `std::io::Write` for output.
 
@@ -192,6 +192,6 @@ In practice, encoding is always the bottleneck—muxing overhead is negligible.
 
 ## License
 
-Dual licensed under MIT OR Apache-2.0.
+Licensed under MIT.
 
 Muxide is designed to be boring in the best way: predictable, strict, fast, and invisible once integrated.
