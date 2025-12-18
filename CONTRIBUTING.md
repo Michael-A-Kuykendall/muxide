@@ -1,116 +1,87 @@
 # Contributing to Muxide
 
-Thank you for your interest in contributing to Muxide! This document provides guidelines and information for contributors.
+Thank you for your interest in Muxide!
 
-## Code of Conduct
+## Open Source, Not Open Contribution
 
-Be respectful and constructive. We're all here to build great software.
+Muxide is **open source** but **not open contribution**.
 
-## Getting Started
+- The code is freely available under the MIT license
+- You can fork, modify, use, and learn from it without restriction
+- **Pull requests are not accepted by default**
+- All architectural, roadmap, and merge decisions are made by the project maintainer
 
-1. Fork the repository
-2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/muxide.git`
-3. Create a branch: `git checkout -b feature/your-feature`
-4. Make your changes
-5. Run tests: `cargo test`
-6. Submit a pull request
+This model keeps the project coherent, maintains clear ownership, and ensures consistent quality. It's the same approach used by SQLite and many infrastructure projects.
 
-## Development Setup
+## How to Contribute
 
-```bash
-# Clone and enter the repo
-git clone https://github.com/Michael-A-Kuykendall/muxide.git
-cd muxide
+If you believe you can contribute meaningfully to Muxide:
 
-# Run tests
-cargo test
+1. **Email the maintainer first**: [michaelallenkuykendall@gmail.com](mailto:michaelallenkuykendall@gmail.com)
+2. Describe your background and proposed contribution
+3. If there is alignment, a scoped collaboration may be discussed privately
+4. Only after discussion will PRs be considered
 
-# Check formatting
-cargo fmt --check
+**Unsolicited PRs will be closed without merge.** This isn't personal — it's how this project operates.
 
-# Run clippy
-cargo clippy -- -D warnings
+## What We Welcome (via email first)
 
-# Generate coverage report (requires cargo-tarpaulin)
-cargo tarpaulin --out Html
-```
+- Bug reports with detailed reproduction steps (Issues are fine)
+- Security vulnerability reports (please email directly)
+- Documentation improvements (discuss first)
+- Codec-specific bug fixes (discuss first)
 
-## Pull Request Guidelines
+## What We Handle Internally
 
-### Before Submitting
+- New features and architectural changes
+- API design decisions
+- New codec support
+- Performance optimizations
+- Container format compatibility work
 
-- [ ] All tests pass (`cargo test`)
-- [ ] Code is formatted (`cargo fmt`)
-- [ ] No clippy warnings (`cargo clippy -- -D warnings`)
-- [ ] New code has tests
-- [ ] Documentation is updated if needed
+## Bug Reports
 
-### PR Title Format
-
-Use conventional commits:
-- `feat:` New feature
-- `fix:` Bug fix
-- `docs:` Documentation only
-- `test:` Test changes
-- `refactor:` Code refactoring
-- `perf:` Performance improvement
-
-### What We Look For
-
-1. **Zero dependencies** - We don't add runtime dependencies
-2. **MSRV 1.70** - Use only features available in Rust 1.70
-3. **Test coverage** - New code should have property tests
-4. **Documentation** - Public APIs need doc comments
-
-## Architecture Overview
-
-```
-src/
-├── api.rs           # Public MuxerBuilder interface
-├── mp4.rs           # MP4/ISOBMFF box construction
-├── aac.rs           # AAC ADTS parsing
-├── fragmented.rs    # Fragmented MP4 support
-├── invariant_ppt.rs # Testing infrastructure
-└── lib.rs           # Module exports
-```
-
-## Testing Philosophy
-
-We use **Invariant PPT** (Property-based Testing):
-
-1. **Property tests** - Use `proptest` for edge cases
-2. **Invariants** - Use `assert_invariant!()` for runtime checks
-3. **Contract tests** - Verify invariants are enforced
-
-Example property test:
-```rust
-proptest! {
-    #[test]
-    fn pts_always_increases(frames in prop::collection::vec(any::<u64>(), 1..100)) {
-        // Property: PTS must always be monotonically increasing
-    }
-}
-```
-
-## Reporting Issues
-
-When reporting bugs, please include:
-- Rust version (`rustc --version`)
+Bug reports via GitHub Issues are welcome! Please include:
+- Rust version and muxide version
 - OS and version
-- Minimal reproduction code
+- Minimal reproduction case
 - Expected vs actual behavior
+- Sample files if relevant (or instructions to generate them)
 
-## Feature Requests
+## Code Style (for reference)
 
-We welcome feature requests! Please:
-- Check existing issues first
-- Describe the use case
-- Explain why it fits Muxide's scope (see `docs/charter.md`)
+If a contribution is discussed and approved:
+- Rust 2021 edition with `cargo fmt` and `cargo clippy`
+- Zero runtime dependencies (only std)
+- MSRV 1.70 compatibility
+- Property-based tests for new functionality
+- All public APIs must have documentation
 
-## License
+## Muxide Philosophy
 
-By contributing, you agree that your contributions will be licensed under the same MIT OR Apache-2.0 dual license as the project.
+Any accepted work must align with:
+- **Zero dependencies**: Only std at runtime
+- **Pure Rust**: No unsafe, no FFI
+- **Strict validation**: Garbage in, error out
+- **Standards compliance**: Valid ISO-BMFF output
+- **MIT licensed**: No GPL contamination
 
-## Questions?
+## Why This Model?
 
-Open an issue with the `question` label.
+Building reliable multimedia infrastructure requires tight architectural control. This ensures:
+- Consistent API design
+- No ownership disputes or governance overhead
+- Quality control without committee delays
+- Clear direction for the project's future
+
+The code is open. The governance is centralized. This is intentional.
+
+## Recognition
+
+Helpful bug reports and community members are acknowledged in release notes.
+If email collaboration leads to merged work, attribution will be given appropriately.
+
+---
+
+**Maintainer**: Michael A. Kuykendall
+**Contact**: [michaelallenkuykendall@gmail.com](mailto:michaelallenkuykendall@gmail.com)

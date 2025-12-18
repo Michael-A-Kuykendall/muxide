@@ -1,6 +1,6 @@
 <p align="center">
   <img src="https://raw.githubusercontent.com/Michael-A-Kuykendall/muxide/main/assets/muxide-logo.png" alt="Muxide" width="350"><br>
-  <em>Zero-dependency pure-Rust MP4 muxer for recording applications.</em><br>
+  <strong>The last mile from encoder to playable MP4.</strong><br><br>
   <a href="https://crates.io/crates/muxide"><img src="https://img.shields.io/crates/v/muxide.svg" alt="Crates.io"></a>
   <a href="https://docs.rs/muxide"><img src="https://docs.rs/muxide/badge.svg" alt="Documentation"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
@@ -8,20 +8,40 @@
   <a href="https://github.com/Michael-A-Kuykendall/muxide/actions"><img src="https://github.com/Michael-A-Kuykendall/muxide/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
-> **Muxide turns correctly-timestamped, already-encoded audio/video frames into a standards-compliant MP4 — pure Rust, zero runtime deps, no external tooling required for muxing.**
+<p align="center">
+  <code>cargo add muxide</code>
+</p>
+
+---
+
+> **Muxide** takes correctly-timestamped, already-encoded audio/video frames and produces a standards-compliant MP4 — **pure Rust, zero runtime dependencies, no FFmpeg.**
+
+<table>
+<tr>
+<td align="center"><strong>Your Encoder</strong><br><sub>H.264 / HEVC / AV1<br>AAC / Opus</sub></td>
+<td align="center">➡️</td>
+<td align="center"><strong>Muxide</strong><br><sub>Pure Rust<br>Zero deps</sub></td>
+<td align="center">➡️</td>
+<td align="center"><strong>playable.mp4</strong><br><sub>Standards-compliant<br>Fast-start ready</sub></td>
+</tr>
+</table>
+
+---
 
 ## Why Muxide Exists
 
-If you are building a recording pipeline in Rust, you already know the tradeoffs:
+If you're building a recording pipeline in Rust, you know the tradeoffs:
 
-- **FFmpeg** is powerful, but usually implies an external binary (distribution, process orchestration, and “what was this build configured with?” questions).
-- Low-level MP4 writing APIs exist, but they require container expertise (sample tables, interleaving, seeking/indexing, and box layout).
-- Many “minimal” approaches fall down on fast-start layout, strict validation, or production-grade ergonomics.
+| Approach | Tradeoff |
+|----------|----------|
+| **FFmpeg CLI/libs** | External binary, GPL licensing concerns, "which build is this?" |
+| **GStreamer** | Complex plugin system, C dependencies, heavy runtime |
+| **Raw MP4 writing** | ISO-BMFF expertise required (sample tables, interleaving, moov layout) |
+| **"Minimal" crates** | Often missing fast-start, strict validation, or production ergonomics |
 
-Muxide exists to solve one job **cleanly and completely**:
+Muxide solves **one job cleanly**:
 
-> Take already-encoded audio/video frames with correct timestamps and produce a
-> **standards-compliant, immediately-playable MP4** using **pure Rust**.
+> Take already-encoded frames with correct timestamps → produce a **standards-compliant, immediately-playable MP4** → using **pure Rust**.
 
 Nothing more. Nothing less.
 
@@ -29,44 +49,44 @@ Nothing more. Nothing less.
 
 Muxide enforces a strict contract:
 
-- **Input must be already encoded** (H.264/H.265/AV1 video; AAC/Opus audio)
-- **Timestamps must be correct** (monotonic PTS; provide DTS explicitly for B-frames)
-- **Muxide does not guess or “fix” broken streams**
+| Your Responsibility | Muxide's Guarantee |
+|:-------------------:|:------------------:|
+| ✓ Frames are already encoded | ✓ Valid ISO-BMFF (MP4) |
+| ✓ Timestamps are monotonic | ✓ Correct sample tables |
+| ✓ DTS provided for B-frames | ✓ Fast-start layout |
+| ✓ Codec headers in keyframes | ✓ No post-processing needed |
 
-In return, Muxide guarantees:
+If input violates the contract, Muxide **fails fast** with explicit errors—no silent corruption, no guessing.
 
-- A valid ISO-BMFF (MP4) file
-- Correct sample tables and offsets
-- Optional fast-start layout (moov before mdat)
-- No post-processing or external tools required
-
-If the input violates the contract, Muxide fails fast with explicit errors.
+---
 
 ## Features
 
-### Video Codecs
-- ✅ **H.264/AVC** (Annex B format)
-- ✅ **H.265/HEVC** (Annex B format with VPS/SPS/PPS)
-- ✅ **AV1** (OBU stream format)
+| Category | Supported | Notes |
+|----------|-----------|-------|
+| **Video** | H.264/AVC | Annex B format |
+| | H.265/HEVC | Annex B with VPS/SPS/PPS |
+| | AV1 | OBU stream format |
+| **Audio** | AAC | ADTS format |
+| | Opus | Raw packets, 48kHz |
+| **Container** | Fast-start | `moov` before `mdat` for web playback |
+| | B-frames | Explicit PTS/DTS support |
+| | Fragmented MP4 | For DASH/HLS streaming |
+| | Metadata | Title, creation time |
 
-### Audio Codecs
-- ✅ **AAC** (ADTS format)
-- ✅ **Opus** (raw packets, 48kHz)
+### Design Principles
 
-### Container Features
-- ✅ **Fast-start** (moov before mdat) for web-friendly playback
-- ✅ **B-frame support** via explicit PTS/DTS
-- ✅ **Fragmented MP4** for DASH/HLS streaming
-- ✅ **Metadata** (title, creation time)
+| Principle | Implementation |
+|-----------|----------------|
+| 🦀 **Pure Rust** | No unsafe, no FFI, no C bindings |
+| 📦 **Zero deps** | Only `std` — no runtime dependencies |
+| 🧵 **Thread-safe** | `Send + Sync` when writer is |
+| ✅ **Well-tested** | Unit, integration, property tests |
+| 📜 **MIT license** | No GPL, no copyleft concerns |
 
-### Philosophy
-- ✅ **Zero runtime dependencies** (only std)
-- ✅ **Pure Rust** (no unsafe, no FFI)
-- ✅ **Thread-safe** (`Send + Sync` when writer is)
-- ✅ **Extensive test suite** (unit, integration, and property tests)
-- ✅ **MIT** (no GPL)
+> **Note:** `no_std` is not supported. Muxide requires `std::io::Write`.
 
-> **Note:** `no_std` is not supported. Muxide requires `std::io::Write` for output.
+---
 
 ## Quick Start
 
@@ -94,42 +114,100 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-### Other Codecs
+<details>
+<summary><strong>📹 More Examples: HEVC, AV1, Opus, Fragmented MP4</strong></summary>
+
+### HEVC/H.265 (4K)
 
 ```rust
-// HEVC/H.265 - requires VPS, SPS, PPS in first keyframe
+// Requires VPS, SPS, PPS in first keyframe
 let mut muxer = MuxerBuilder::new(file)
-    .video(VideoCodec::H265, 3840, 2160, 30.0)  // 4K HEVC
+    .video(VideoCodec::H265, 3840, 2160, 30.0)
     .build()?;
 muxer.write_video(0.0, &hevc_annexb_with_vps_sps_pps, true)?;
+```
 
-// AV1 - requires Sequence Header OBU in first keyframe
+### AV1
+
+```rust
+// Requires Sequence Header OBU in first keyframe
 let mut muxer = MuxerBuilder::new(file)
     .video(VideoCodec::Av1, 1920, 1080, 60.0)
     .build()?;
 muxer.write_video(0.0, &av1_obu_with_sequence_header, true)?;
+```
 
-// Opus audio - sample rate is always 48kHz per Opus spec
-// (input sample_rate parameter is accepted but internally normalized)
+### Opus Audio
+
+```rust
+// Opus always uses 48kHz internally (per spec)
 let mut muxer = MuxerBuilder::new(file)
     .video(VideoCodec::H264, 1920, 1080, 30.0)
-    .audio(AudioCodec::Opus, 48000, 2)  // Opus requires 48kHz
+    .audio(AudioCodec::Opus, 48000, 2)
     .build()?;
 muxer.write_audio(0.0, &opus_packet)?;
 ```
 
+### Fragmented MP4 (DASH/HLS)
+
+```rust
+let mut muxer = MuxerBuilder::new(file)
+    .video(VideoCodec::H264, 1920, 1080, 30.0)
+    .fragmented(true)  // Enable fMP4 mode
+    .build()?;
+
+// Write frames, then flush fragments periodically
+muxer.write_video(0.0, &frame, true)?;
+muxer.flush_fragment()?;  // Writes an moof+mdat pair
+```
+
+### B-Frames with Explicit DTS
+
+```rust
+// When encoder produces B-frames, provide both PTS and DTS
+muxer.write_video_with_dts(
+    pts_seconds,  // Presentation timestamp
+    dts_seconds,  // Decode timestamp (for B-frame ordering)
+    &frame_data,
+    is_keyframe
+)?;
+```
+
+</details>
+
+---
+
 ## What Muxide Is Not
 
-Muxide is intentionally opinionated. It does **not**:
+Muxide is intentionally **focused**. It does **not**:
 
-- Encode or decode audio/video
-- Transcode between codecs
-- Read/demux existing MP4 files
-- Perform heuristic timestamp correction
-- Support non-MP4 containers (MKV, WebM, etc.)
-- Handle DRM or encryption
+| Not Supported | Why |
+|---------------|-----|
+| Encoding/decoding | Use `openh264`, `x264`, `rav1e`, etc. |
+| Transcoding | Not a codec library |
+| Demuxing/reading MP4 | Write-only by design |
+| Timestamp correction | Garbage in = error out |
+| Non-MP4 containers | MKV, WebM, AVI not supported |
+| DRM/encryption | Out of scope |
 
-Muxide is the **last mile**: from encoder output to a playable file.
+**Muxide is the last mile**: encoder output → playable file.
+
+---
+
+## Use Cases
+
+Muxide is a great fit for:
+
+- 🎥 **Screen recorders** — capture → encode → mux → ship
+- 📹 **Camera apps** — webcam/IP camera recording pipelines
+- 🎬 **Video editors** — export timeline to MP4
+- 📡 **Streaming** — generate fMP4 segments for DASH/HLS
+- 🏭 **Embedded systems** — single binary, no external deps
+- 🔬 **Scientific apps** — deterministic, reproducible output
+
+Probably **not** a fit if you need encoding, demuxing, or legacy codecs (MPEG-2, etc.).
+
+---
 
 ## Example: Fast-Start Proof
 
@@ -157,41 +235,128 @@ This example is intentionally minimal:
 - No B-frames/DTS paths are exercised
 - The goal is container layout correctness, not encoding quality
 
-## Who This Is For
-
-Muxide is a good fit if you are:
-
-- Building a screen recorder, camera app, or capture pipeline
-- Writing a video editor/exporter in Rust
-- Shipping MP4 output without bundling external binaries
-- Generating fMP4 segments for streaming
-- Operating in environments where external tooling is undesirable
-
-Muxide is probably not a fit if you need encoding/transcoding, container introspection/editing, or legacy codec support.
+---
 
 ## Performance
 
-Muxide is designed for minimal overhead. Benchmarks run on a standard development machine:
+Muxide is designed for **minimal overhead**. Muxing should never be your bottleneck.
 
 | Scenario | Time | Throughput |
 |----------|------|------------|
 | 1000 H.264 frames | 264 µs | **3.7M frames/sec** |
-| 1000 H.264 frames (fast-start) | 362 µs | 2.8M frames/sec |
+| 1000 H.264 + fast-start | 362 µs | 2.8M frames/sec |
 | 1000 video + 1500 audio | 457 µs | 2.2M frames/sec |
 | 100 4K frames (~6.5 MB) | 14 ms | **464 MB/sec** |
 
-Run benchmarks yourself: `cargo bench`
+<details>
+<summary><strong>Run benchmarks yourself</strong></summary>
 
-In practice, encoding is always the bottleneck—muxing overhead is negligible.
+```bash
+cargo bench
+```
+
+Benchmarks run on standard development hardware. In practice, **encoding is always the bottleneck** — muxing overhead is negligible.
+
+</details>
+
+---
+
+## Input Format Requirements
+
+<details>
+<summary><strong>📋 Codec-specific requirements (click to expand)</strong></summary>
+
+### H.264/AVC
+
+- **Format:** Annex B (start codes: `00 00 00 01` or `00 00 01`)
+- **First keyframe must contain:** SPS and PPS NAL units
+- **NAL unit types:** IDR (keyframe), non-IDR, SPS, PPS
+
+### H.265/HEVC
+
+- **Format:** Annex B (start codes)
+- **First keyframe must contain:** VPS, SPS, and PPS NAL units
+- **NAL unit types:** IDR_W_RADL, IDR_N_LP, CRA, VPS, SPS, PPS
+
+### AV1
+
+- **Format:** OBU (Open Bitstream Unit) stream
+- **First keyframe must contain:** Sequence Header OBU
+- **OBU types:** Sequence Header, Frame, Frame Header, Tile Group
+
+### AAC
+
+- **Format:** ADTS (Audio Data Transport Stream)
+- **Header:** 7-byte ADTS header per frame
+- **Profiles:** LC-AAC recommended
+
+### Opus
+
+- **Format:** Raw Opus packets (no container)
+- **Sample rate:** Always 48000 Hz (Opus specification)
+- **Channels:** 1 (mono) or 2 (stereo)
+
+</details>
+
+---
 
 ## Documentation
 
-- [API Reference (docs.rs)](https://docs.rs/muxide)
-- [Design Charter](docs/charter.md)
-- [API Contract](docs/contract.md)
+| Resource | Description |
+|----------|-------------|
+| [📚 API Reference](https://docs.rs/muxide) | Complete API documentation |
+| [📜 Design Charter](docs/charter.md) | Architecture decisions and rationale |
+| [📋 API Contract](docs/contract.md) | Input/output guarantees |
+
+---
+
+## FAQ
+
+<details>
+<summary><strong>Why not just use FFmpeg?</strong></summary>
+
+FFmpeg is excellent, but:
+- External binary dependency (distribution complexity)
+- GPL licensing concerns for some builds
+- Process orchestration overhead
+- "What flags was this built with?" debugging
+
+Muxide is a single `cargo add` with zero external dependencies.
+
+</details>
+
+<details>
+<summary><strong>Can Muxide encode video?</strong></summary>
+
+No. Muxide is **muxing only**. For encoding, use:
+- `openh264` — H.264 encoding (BSD)
+- `rav1e` — AV1 encoding (BSD)
+- `x264`/`x265` — H.264/HEVC (GPL, via FFI)
+
+</details>
+
+<details>
+<summary><strong>What if my timestamps are wrong?</strong></summary>
+
+Muxide will reject non-monotonic timestamps with a clear error. It does not attempt to "fix" broken input — this is by design to ensure predictable output.
+
+</details>
+
+<details>
+<summary><strong>Is Muxide production-ready?</strong></summary>
+
+Yes. Muxide has an extensive test suite (unit, integration, property-based tests) and is designed for predictable, deterministic behavior.
+
+</details>
+
+---
 
 ## License
 
-Licensed under MIT.
+MIT — no GPL, no copyleft, no surprises.
 
-Muxide is designed to be boring in the best way: predictable, strict, fast, and invisible once integrated.
+---
+
+<p align="center">
+  <em>Muxide is designed to be <strong>boring</strong> in the best way:<br>predictable, strict, fast, and invisible once integrated.</em>
+</p>
