@@ -312,7 +312,7 @@ fn build_mdia_fmp4(config: &FragmentConfig) -> Vec<u8> {
     let mut payload = Vec::new();
 
     // mdhd (media header)
-    let mdhd = build_mdhd_fmp4(config.timescale);
+    let mdhd = build_mdhd_fmp4(config.timescale, None);
     payload.extend_from_slice(&mdhd);
 
     // hdlr (handler)
@@ -326,14 +326,29 @@ fn build_mdia_fmp4(config: &FragmentConfig) -> Vec<u8> {
     build_box(b"mdia", &payload)
 }
 
-fn build_mdhd_fmp4(timescale: u32) -> Vec<u8> {
+fn encode_language_code(language: &str) -> [u8; 2] {
+    // ISO 639-2/T language codes are packed into 16 bits as (c1<<10) | (c2<<5) | c3
+    // where each character is offset by 0x60
+    let chars: Vec<char> = language.chars().take(3).collect();
+    let c1 = chars.get(0).copied().unwrap_or('u') as u16;
+    let c2 = chars.get(1).copied().unwrap_or('n') as u16;
+    let c3 = chars.get(2).copied().unwrap_or('d') as u16;
+    
+    let packed = ((c1.saturating_sub(0x60) & 0x1F) << 10) |
+                 ((c2.saturating_sub(0x60) & 0x1F) << 5) |
+                 (c3.saturating_sub(0x60) & 0x1F);
+    
+    packed.to_be_bytes()
+}
+
+fn build_mdhd_fmp4(timescale: u32, language: Option<&str>) -> Vec<u8> {
     let mut payload = Vec::new();
     payload.extend_from_slice(&0u32.to_be_bytes()); // Version + flags
     payload.extend_from_slice(&0u32.to_be_bytes()); // Creation time
     payload.extend_from_slice(&0u32.to_be_bytes()); // Modification time
     payload.extend_from_slice(&timescale.to_be_bytes()); // Timescale
     payload.extend_from_slice(&0u32.to_be_bytes()); // Duration (unknown)
-    payload.extend_from_slice(&0x55c4_u16.to_be_bytes()); // Language: und
+    payload.extend_from_slice(&encode_language_code(language.unwrap_or("und"))); // Language
     payload.extend_from_slice(&0u16.to_be_bytes()); // Quality
     build_box(b"mdhd", &payload)
 }

@@ -819,13 +819,13 @@ fn build_moov_box(
 
     let mvhd_payload = build_mvhd_payload(video_duration_ms);
     let mvhd_box = build_box(b"mvhd", &mvhd_payload);
-    let trak_box = build_trak_box(video, video_tables, video_config);
+    let trak_box = build_trak_box(video, video_tables, video_config, metadata);
 
     let mut payload = Vec::new();
     payload.extend_from_slice(&mvhd_box);
     payload.extend_from_slice(&trak_box);
     if let Some((audio_track, audio_tables)) = audio {
-        let audio_trak = build_audio_trak_box(audio_track, audio_tables);
+        let audio_trak = build_audio_trak_box(audio_track, audio_tables, metadata);
         payload.extend_from_slice(&audio_trak);
     }
 
@@ -840,9 +840,9 @@ fn build_moov_box(
     build_box(b"moov", &payload)
 }
 
-fn build_audio_trak_box(audio: &Mp4AudioTrack, tables: &SampleTables) -> Vec<u8> {
+fn build_audio_trak_box(audio: &Mp4AudioTrack, tables: &SampleTables, metadata: Option<&Metadata>) -> Vec<u8> {
     let tkhd_box = build_audio_tkhd_box();
-    let mdia_box = build_audio_mdia_box(audio, tables);
+    let mdia_box = build_audio_mdia_box(audio, tables, metadata);
 
     let mut payload = Vec::new();
     payload.extend_from_slice(&tkhd_box);
@@ -854,9 +854,10 @@ fn build_audio_tkhd_box() -> Vec<u8> {
     build_tkhd_box_with_id(2, 0x0100, 0, 0)
 }
 
-fn build_audio_mdia_box(audio: &Mp4AudioTrack, tables: &SampleTables) -> Vec<u8> {
+fn build_audio_mdia_box(audio: &Mp4AudioTrack, tables: &SampleTables, metadata: Option<&Metadata>) -> Vec<u8> {
     let duration = tables.total_duration();
-    let mdhd_box = build_mdhd_box_with_timescale(MEDIA_TIMESCALE, duration);
+    let language = metadata.and_then(|m| m.language.as_deref());
+    let mdhd_box = build_mdhd_box_with_timescale_and_duration(MEDIA_TIMESCALE, duration, language);
     let hdlr_box = build_sound_hdlr_box();
     let minf_box = build_audio_minf_box(audio, tables);
 
@@ -1070,9 +1071,10 @@ fn build_trak_box(
     video: &Mp4VideoTrack,
     tables: &SampleTables,
     video_config: &VideoConfig,
+    metadata: Option<&Metadata>,
 ) -> Vec<u8> {
     let tkhd_box = build_tkhd_box(video);
-    let mdia_box = build_mdia_box(video, tables, video_config);
+    let mdia_box = build_mdia_box(video, tables, video_config, metadata);
 
     let mut payload = Vec::new();
     payload.extend_from_slice(&tkhd_box);
@@ -1084,9 +1086,11 @@ fn build_mdia_box(
     video: &Mp4VideoTrack,
     tables: &SampleTables,
     video_config: &VideoConfig,
+    metadata: Option<&Metadata>,
 ) -> Vec<u8> {
     let duration = tables.total_duration();
-    let mdhd_box = build_mdhd_box_with_timescale(MEDIA_TIMESCALE, duration);
+    let language = metadata.and_then(|m| m.language.as_deref());
+    let mdhd_box = build_mdhd_box_with_timescale_and_duration(MEDIA_TIMESCALE, duration, language);
     let hdlr_box = build_hdlr_box();
     let minf_box = build_minf_box(video, tables, video_config);
 
@@ -1564,22 +1568,37 @@ fn build_url_box() -> Vec<u8> {
 
 #[allow(dead_code)]
 fn build_mdhd_box() -> Vec<u8> {
-    build_mdhd_box_with_timescale_and_duration(MEDIA_TIMESCALE, 0)
+    build_mdhd_box_with_timescale_and_duration(MEDIA_TIMESCALE, 0, None)
 }
 
 #[allow(dead_code)]
 fn build_mdhd_box_with_timescale(timescale: u32, duration: u64) -> Vec<u8> {
-    build_mdhd_box_with_timescale_and_duration(timescale, duration)
+    build_mdhd_box_with_timescale_and_duration(timescale, duration, None)
 }
 
-fn build_mdhd_box_with_timescale_and_duration(timescale: u32, duration: u64) -> Vec<u8> {
+fn encode_language_code(language: &str) -> [u8; 2] {
+    // ISO 639-2/T language codes are packed into 16 bits as (c1<<10) | (c2<<5) | c3
+    // where each character is offset by 0x60
+    let chars: Vec<char> = language.chars().take(3).collect();
+    let c1 = chars.get(0).copied().unwrap_or('u') as u16;
+    let c2 = chars.get(1).copied().unwrap_or('n') as u16;
+    let c3 = chars.get(2).copied().unwrap_or('d') as u16;
+    
+    let packed = ((c1.saturating_sub(0x60) & 0x1F) << 10) |
+                 ((c2.saturating_sub(0x60) & 0x1F) << 5) |
+                 (c3.saturating_sub(0x60) & 0x1F);
+    
+    packed.to_be_bytes()
+}
+
+fn build_mdhd_box_with_timescale_and_duration(timescale: u32, duration: u64, language: Option<&str>) -> Vec<u8> {
     let mut payload = Vec::new();
     payload.extend_from_slice(&0u32.to_be_bytes()); // version + flags
     payload.extend_from_slice(&0u32.to_be_bytes()); // creation_time
     payload.extend_from_slice(&0u32.to_be_bytes()); // modification_time
     payload.extend_from_slice(&timescale.to_be_bytes());
     payload.extend_from_slice(&(duration as u32).to_be_bytes()); // duration
-    payload.extend_from_slice(&0x55c4u16.to_be_bytes()); // language (und)
+    payload.extend_from_slice(&encode_language_code(language.unwrap_or("und"))); // language
     payload.extend_from_slice(&0u16.to_be_bytes()); // pre_defined
     build_box(b"mdhd", &payload)
 }

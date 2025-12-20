@@ -71,6 +71,8 @@ pub struct Metadata {
     pub title: Option<String>,
     /// Creation timestamp in seconds since Unix epoch (1970-01-01)
     pub creation_time: Option<u64>,
+    /// Language code (ISO 639-2/T format, e.g., "eng", "spa", "und")
+    pub language: Option<String>,
 }
 
 impl Metadata {
@@ -94,6 +96,12 @@ impl Metadata {
         if let Ok(duration) = SystemTime::now().duration_since(UNIX_EPOCH) {
             self.creation_time = Some(duration.as_secs());
         }
+        self
+    }
+
+    /// Set language code (ISO 639-2/T format, e.g., "eng", "spa", "und")
+    pub fn with_language(mut self, language: impl Into<String>) -> Self {
+        self.language = Some(language.into());
         self
     }
 }
@@ -197,6 +205,18 @@ impl<Writer> MuxerBuilder<Writer> {
     /// Default is `true` for web streaming compatibility.
     pub fn with_fast_start(mut self, enabled: bool) -> Self {
         self.fast_start = enabled;
+        self
+    }
+
+    /// Set creation time for the media file (MP4E compatibility method)
+    pub fn set_create_time(mut self, unix_timestamp: u64) -> Self {
+        self.metadata.get_or_insert_with(Metadata::default).creation_time = Some(unix_timestamp);
+        self
+    }
+
+    /// Set language code for the media file (MP4E compatibility method)
+    pub fn set_language(mut self, language: impl Into<String>) -> Self {
+        self.metadata.get_or_insert_with(Metadata::default).language = Some(language.into());
         self
     }
 
