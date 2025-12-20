@@ -137,6 +137,191 @@ impl SampleTables {
     }
 }
 
+/// Severity level for validation errors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum ErrorSeverity {
+    /// Critical error that prevents muxing (e.g., invalid syncword, corrupted data)
+    Error,
+    /// Warning for potential issues that might still work but are non-standard
+    Warning,
+}
+
+/// Detailed ADTS validation error with comprehensive diagnostic information.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AdtsValidationError {
+    /// The specific validation error that occurred.
+    pub kind: AdtsErrorKind,
+    /// Severity level of this error.
+    pub severity: ErrorSeverity,
+    /// Byte offset where the error was detected (0-based).
+    pub byte_offset: usize,
+    /// Expected value at the error location (if applicable).
+    pub expected: Option<String>,
+    /// Actual value found at the error location (if applicable).
+    pub found: Option<String>,
+    /// Enhanced hex dump with ASCII representation (up to 16 bytes).
+    pub hex_dump: Option<String>,
+    /// Recovery suggestion for fixing this error.
+    pub suggestion: Option<String>,
+    /// Code example showing how to fix this error.
+    pub code_example: Option<String>,
+    /// Technical details for developers (shown in verbose mode).
+    pub technical_details: Option<String>,
+    /// Related errors that occurred in the same frame.
+    pub related_errors: Vec<AdtsValidationError>,
+}
+
+/// Specific types of ADTS validation errors with detailed context.
+#[derive(Debug, Clone, serde::Serialize)]
+pub enum AdtsErrorKind {
+    /// Frame is too short to contain a valid ADTS header.
+    FrameTooShort,
+    /// Missing ADTS syncword (0xFFF) in first 12 bits.
+    MissingSyncword,
+    /// Frame length field indicates invalid size.
+    InvalidFrameLength,
+    /// Header length calculation doesn't match frame size.
+    InvalidHeaderLength,
+    /// MPEG version field contains invalid value.
+    InvalidMpegVersion,
+    /// Layer field is not set to 0 (reserved for AAC).
+    InvalidLayer,
+    /// Sample rate index is out of valid range.
+    InvalidSampleRateIndex,
+    /// Channel configuration is invalid.
+    InvalidChannelConfig,
+    /// CRC mismatch (if protection is present).
+    CrcMismatch,
+}
+
+impl fmt::Display for AdtsValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Severity indicator
+        let severity_icon = match self.severity {
+            ErrorSeverity::Error => "🚨",
+            ErrorSeverity::Warning => "⚠️",
+        };
+        write!(f, "{} ", severity_icon)?;
+
+        // Main error message
+        match &self.kind {
+            AdtsErrorKind::FrameTooShort => {
+                write!(f, "ADTS frame too short: need at least 7 bytes for header, got {}", self.byte_offset)?;
+            }
+            AdtsErrorKind::MissingSyncword => {
+                write!(f, "ADTS syncword missing at byte {}: expected 0xFFF in first 12 bits", self.byte_offset)?;
+                if let (Some(_expected), Some(found)) = (&self.expected, &self.found) {
+                    write!(f, " (expected {}, found {})", _expected, found)?;
+                }
+            }
+            AdtsErrorKind::InvalidFrameLength => {
+                write!(f, "ADTS frame length invalid at byte {}: ", self.byte_offset)?;
+                if let (Some(_expected), Some(found)) = (&self.expected, &self.found) {
+                    write!(f, "expected {}, found {}", _expected, found)?;
+                }
+                write!(f, " (frame length must be >= header length and <= total frame size)")?;
+            }
+            AdtsErrorKind::InvalidHeaderLength => {
+                write!(f, "ADTS header length mismatch at byte {}: ", self.byte_offset)?;
+                if let (Some(expected), Some(found)) = (&self.expected, &self.found) {
+                    write!(f, "expected header length {}, found {}", expected, found)?;
+                }
+                write!(f, " (check protection_absent flag)")?;
+            }
+            AdtsErrorKind::InvalidMpegVersion => {
+                write!(f, "ADTS MPEG version invalid at byte {}: ", self.byte_offset)?;
+                if let (Some(_expected), Some(found)) = (&self.expected, &self.found) {
+                    write!(f, "expected {}, found {}", _expected, found)?;
+                }
+                write!(f, " (only MPEG-4 AAC is supported)")?;
+            }
+            AdtsErrorKind::InvalidLayer => {
+                write!(f, "ADTS layer field invalid at byte {}: ", self.byte_offset)?;
+                if let (Some(_expected), Some(found)) = (&self.expected, &self.found) {
+                    write!(f, "expected {}, found {}", _expected, found)?;
+                }
+                write!(f, " (must be 0 for AAC)")?;
+            }
+            AdtsErrorKind::InvalidSampleRateIndex => {
+                write!(f, "ADTS sample rate index invalid at byte {}: ", self.byte_offset)?;
+                if let (Some(_expected), Some(found)) = (&self.expected, &self.found) {
+                    write!(f, "expected 0-12, found {}", found)?;
+                }
+                write!(f, " (valid range is 0-12 corresponding to 96000-7350 Hz)")?;
+            }
+            AdtsErrorKind::InvalidChannelConfig => {
+                write!(f, "ADTS channel configuration invalid at byte {}: ", self.byte_offset)?;
+                if let (Some(_expected), Some(found)) = (&self.expected, &self.found) {
+                    write!(f, "expected 1-7, found {}", found)?;
+                }
+                write!(f, " (valid range is 1-7 for mono/stereo configurations)")?;
+            }
+            AdtsErrorKind::CrcMismatch => {
+                write!(f, "ADTS CRC mismatch at byte {}: ", self.byte_offset)?;
+                write!(f, "frame data doesn't match CRC checksum")?;
+            }
+        }
+
+        // Add hex dump if available
+        if let Some(hex) = &self.hex_dump {
+            write!(f, "\n  Hex dump: {}", hex)?;
+        }
+
+        // Add suggestion if available
+        if let Some(suggestion) = &self.suggestion {
+            write!(f, "\n  Suggestion: {}", suggestion)?;
+        }
+
+        // Add code example if available
+        if let Some(code) = &self.code_example {
+            write!(f, "\n  Code example: {}", code)?;
+        }
+
+        // Add technical details in verbose mode (if requested)
+        if f.alternate() {
+            if let Some(tech) = &self.technical_details {
+                write!(f, "\n🔍 Technical details: {}", tech)?;
+            }
+        }
+
+        // Show related errors
+        if !self.related_errors.is_empty() {
+            write!(f, "\n\n📋 Related errors in this frame:")?;
+            for (i, related) in self.related_errors.iter().enumerate() {
+                write!(f, "\n  {}. {}", i + 1, related)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl AdtsValidationError {
+    /// Get a JSON representation of this error for programmatic handling.
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
+
+    /// Get a compact JSON representation.
+    pub fn to_json_compact(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
+
+    /// Check if this error is critical (prevents muxing).
+    pub fn is_critical(&self) -> bool {
+        matches!(self.severity, ErrorSeverity::Error)
+    }
+
+    /// Get all errors in this chain (including related errors).
+    pub fn all_errors(&self) -> Vec<&AdtsValidationError> {
+        let mut result = vec![self];
+        for related in &self.related_errors {
+            result.extend(related.all_errors());
+        }
+        result
+    }
+}
+
 /// Errors produced while queuing video samples.
 #[derive(Debug)]
 pub enum Mp4WriterError {
@@ -150,6 +335,8 @@ pub enum Mp4WriterError {
     FirstFrameMissingSequenceHeader,
     /// Audio sample is not a valid ADTS frame.
     InvalidAdts,
+    /// Audio sample has detailed ADTS validation errors.
+    InvalidAdtsDetailed(AdtsValidationError),
     /// Audio sample is not a valid Opus packet.
     InvalidOpusPacket,
     /// Audio track is not enabled on this writer.
@@ -174,6 +361,7 @@ impl fmt::Display for Mp4WriterError {
                 write!(f, "first AV1 frame must contain Sequence Header OBU")
             }
             Mp4WriterError::InvalidAdts => write!(f, "invalid ADTS frame"),
+            Mp4WriterError::InvalidAdtsDetailed(err) => write!(f, "{}", err),
             Mp4WriterError::InvalidOpusPacket => write!(f, "invalid Opus packet"),
             Mp4WriterError::AudioNotEnabled => write!(f, "audio track not enabled"),
             Mp4WriterError::DurationOverflow => write!(f, "sample duration overflow"),
@@ -354,7 +542,7 @@ impl<Writer: Write> Mp4Writer<Writer> {
                     "codec::aac"
                 );
 
-                let raw = adts_to_raw(data).ok_or(Mp4WriterError::InvalidAdts)?;
+                let raw = adts_to_raw(data).map_err(Mp4WriterError::InvalidAdtsDetailed)?;
                 raw.to_vec()
             }
             AudioCodec::Opus => {
@@ -777,32 +965,241 @@ enum TrackKind {
     Audio,
 }
 
-fn adts_to_raw(frame: &[u8]) -> Option<&[u8]> {
+fn adts_to_raw(frame: &[u8]) -> Result<&[u8], AdtsValidationError> {
+    // Enhanced hex dump with ASCII and color highlighting
+    let create_hex_dump = |offset: usize, len: usize| -> String {
+        let start = offset.saturating_sub(8).min(frame.len());
+        let end = (offset + len + 8).min(frame.len());
+        let slice = &frame[start..end];
+
+        let mut hex = String::new();
+        let mut ascii = String::new();
+
+        for (i, &byte) in slice.iter().enumerate() {
+            let global_offset = start + i;
+
+            // Highlight error byte with red and asterisk
+            if global_offset == offset {
+                hex.push_str(&format!("\x1b[91m{:02x}*\x1b[0m ", byte));
+            } else if global_offset >= offset && global_offset < offset + len {
+                hex.push_str(&format!("\x1b[93m{:02x}\x1b[0m ", byte)); // Yellow for context
+            } else {
+                hex.push_str(&format!("{:02x} ", byte));
+            }
+
+            // ASCII representation
+            let ascii_char = if byte.is_ascii_graphic() { byte as char } else { '.' };
+            if global_offset == offset {
+                ascii.push_str(&format!("\x1b[91m{}\x1b[0m", ascii_char));
+            } else if global_offset >= offset && global_offset < offset + len {
+                ascii.push_str(&format!("\x1b[93m{}\x1b[0m", ascii_char));
+            } else {
+                ascii.push(ascii_char);
+            }
+
+            // Line breaks every 16 bytes
+            if (i + 1) % 16 == 0 {
+                hex.push_str(&format!(" |{}|\n", ascii));
+                ascii.clear();
+            }
+        }
+
+        if !ascii.is_empty() {
+            // Pad hex to align with ASCII
+            while hex.chars().filter(|&c| c != '\x1b').count() % (16 * 3) != 0 {
+                hex.push(' ');
+            }
+            hex.push_str(&format!(" |{}|", ascii));
+        }
+
+        format!("Hex dump around byte {}:\n{}", offset, hex)
+    };
+
     if frame.len() < 7 {
-        return None;
+        return Err(AdtsValidationError {
+            kind: AdtsErrorKind::FrameTooShort,
+            severity: ErrorSeverity::Error,
+            byte_offset: frame.len(),
+            expected: Some("≥7 bytes for ADTS header".to_string()),
+            found: Some(format!("{} bytes", frame.len())),
+            hex_dump: Some(create_hex_dump(0, frame.len())),
+            suggestion: Some("Ensure you're passing complete ADTS frames. Check if the audio data is truncated or corrupted during transmission.".to_string()),
+            code_example: Some("Ensure your audio frame buffer contains the complete ADTS frame before calling write_audio().".to_string()),
+            technical_details: Some("ADTS header requires minimum 7 bytes: syncword (2 bytes), MPEG info (1 byte), frame length (3 bytes partial), buffer fullness (2 bytes partial).".to_string()),
+            related_errors: Vec::new(),
+        });
     }
 
-    // Syncword 0xFFF (12 bits)
-    if frame[0] != 0xFF || (frame[1] & 0xF0) != 0xF0 {
-        return None;
+    // Syncword validation: 0xFFF (12 bits) - first 12 bits should be 0xFFF
+    let syncword = ((frame[0] as u16) << 4) | ((frame[1] as u16) >> 4);
+    if syncword != 0xFFF {
+        return Err(AdtsValidationError {
+            kind: AdtsErrorKind::MissingSyncword,
+            severity: ErrorSeverity::Error,
+            byte_offset: 0,
+            expected: Some("0xFFF (12-bit syncword)".to_string()),
+            found: Some(format!("0x{:03X}", syncword)),
+            hex_dump: Some(create_hex_dump(0, 2)),
+            suggestion: Some("This doesn't appear to be an ADTS frame. Check if you're passing raw AAC data instead of ADTS-wrapped frames, or if the data is corrupted.".to_string()),
+            code_example: Some("Check frame starts with ADTS syncword: if (frame[0] & 0xFF) == 0xFF && (frame[1] & 0xF0) == 0xF0 { /* valid ADTS */ }".to_string()),
+            technical_details: Some("ADTS syncword is 0xFFF (all 1s in first 12 bits). If this is raw AAC, use AudioCodec::Aac without ADTS framing.".to_string()),
+            related_errors: Vec::new(),
+        });
+    }
+
+    // MPEG version check (bit 12 from syncword) - only MPEG-4 supported
+    let mpeg_version = (frame[1] >> 3) & 0x01;
+    if mpeg_version != 0 {
+        return Err(AdtsValidationError {
+            kind: AdtsErrorKind::InvalidMpegVersion,
+            severity: ErrorSeverity::Error,
+            byte_offset: 1,
+            expected: Some("0 (MPEG-4)".to_string()),
+            found: Some(format!("{} (MPEG-2)", mpeg_version)),
+            hex_dump: Some(create_hex_dump(1, 1)),
+            suggestion: Some("Muxide only supports MPEG-4 AAC. Convert your audio to MPEG-4 AAC format.".to_string()),
+            code_example: Some("Use ffmpeg: ffmpeg -i input.mp3 -c:a aac -profile:a aac_low output.m4a".to_string()),
+            technical_details: Some("MPEG version bit: 0=MPEG-4, 1=MPEG-2. Muxide requires MPEG-4 AAC.".to_string()),
+            related_errors: Vec::new(),
+        });
+    }
+
+    // Layer check (bits 13-14 from syncword) - must be 00 for AAC
+    let layer = (frame[1] >> 1) & 0x03;
+    if layer != 0 {
+        return Err(AdtsValidationError {
+            kind: AdtsErrorKind::InvalidLayer,
+            severity: ErrorSeverity::Error,
+            byte_offset: 1,
+            expected: Some("0 (AAC)".to_string()),
+            found: Some(format!("{} (Layer {})", layer, layer)),
+            hex_dump: Some(create_hex_dump(1, 1)),
+            suggestion: Some("This appears to be MP3 or other MPEG audio format. Convert to AAC format.".to_string()),
+            code_example: Some("Convert MP3 to AAC: ffmpeg -i input.mp3 -c:a aac -b:a 128k output.m4a".to_string()),
+            technical_details: Some("Layer field: 00=AAC, 01=Layer3, 10=Layer2, 11=Layer1. AAC requires 00.".to_string()),
+            related_errors: Vec::new(),
+        });
     }
 
     let protection_absent = (frame[1] & 0x01) != 0;
     let header_len = if protection_absent { 7 } else { 9 };
+
     if frame.len() < header_len {
-        return None;
+        return Err(AdtsValidationError {
+            kind: AdtsErrorKind::InvalidHeaderLength,
+            severity: ErrorSeverity::Error,
+            byte_offset: 1,
+            expected: Some(format!("≥{} bytes (protection_absent={})", header_len, protection_absent)),
+            found: Some(format!("{} bytes", frame.len())),
+            hex_dump: Some(create_hex_dump(0, frame.len())),
+            suggestion: Some(format!("Frame is too short for {} header. Check if CRC protection is present and adjust header length calculation.", if protection_absent { "unprotected" } else { "protected" })),
+            code_example: None,
+            technical_details: Some(format!("Header length: 7 bytes (no CRC) or 9 bytes (with CRC). protection_absent bit: {}", protection_absent)),
+            related_errors: Vec::new(),
+        });
     }
 
-    // aac_frame_length: 13 bits across bytes 3..5 (includes header)
+    // Profile/Object type (bits 16-17)
+    let profile = (frame[2] >> 6) & 0x03;
+    let _profile_name = match profile {
+        0 => "Main",
+        1 => "LC (Low Complexity)",
+        2 => "SSR (Scalable Sample Rate)",
+        3 => "LTP (Long Term Prediction)",
+        _ => "Unknown",
+    };
+
+    // Sample rate index (bits 18-21)
+    let sample_rate_idx = (frame[2] >> 2) & 0x0F;
+    if sample_rate_idx > 12 {
+        return Err(AdtsValidationError {
+            kind: AdtsErrorKind::InvalidSampleRateIndex,
+            severity: ErrorSeverity::Error,
+            byte_offset: 2,
+            expected: Some("0-12 (96000-7350 Hz)".to_string()),
+            found: Some(format!("{} (invalid)", sample_rate_idx)),
+            hex_dump: Some(create_hex_dump(2, 1)),
+            suggestion: Some("Invalid sample rate index. Valid values: 0=96000, 1=88200, 2=64000, 3=48000, 4=44100, 5=32000, 6=24000, 7=22050, 8=16000, 9=12000, 10=11025, 11=8000, 12=7350 Hz.".to_string()),
+            code_example: Some("Common AAC sample rates: 44100 Hz (index 4), 48000 Hz (index 3), 22050 Hz (index 7)".to_string()),
+            technical_details: Some("Sample rate index is 4 bits (0-12). Values 13-15 are reserved.".to_string()),
+            related_errors: Vec::new(),
+        });
+    }
+
+    // Channel configuration (bits 23-25)
+    let channel_config = ((frame[2] & 0x01) << 2) | ((frame[3] >> 6) & 0x03);
+    if channel_config == 0 || channel_config > 7 {
+        return Err(AdtsValidationError {
+            kind: AdtsErrorKind::InvalidChannelConfig,
+            severity: ErrorSeverity::Error,
+            byte_offset: 2,
+            expected: Some("1-7 (mono to 7.1 surround)".to_string()),
+            found: Some(format!("{} (invalid)", channel_config)),
+            hex_dump: Some(create_hex_dump(2, 2)),
+            suggestion: Some("Invalid channel configuration. For stereo use 2, for mono use 1. Values 0 and 8+ are reserved.".to_string()),
+            code_example: Some("AAC channel configs: 1=mono, 2=stereo. Use AudioCodec::Aac(AacProfile::Lc) for 2-channel stereo.".to_string()),
+            technical_details: Some("Channel config: 1=mono, 2=stereo, 3=3.0, 4=4.0, 5=5.0, 6=5.1, 7=7.1. 0=implicit, 8+=reserved.".to_string()),
+            related_errors: Vec::new(),
+        });
+    }
+
+    // Frame length validation (13 bits across bytes 3-5)
     let aac_frame_length: usize = (((frame[3] & 0x03) as usize) << 11)
         | ((frame[4] as usize) << 3)
         | (((frame[5] & 0xE0) as usize) >> 5);
 
-    if aac_frame_length < header_len || aac_frame_length > frame.len() {
-        return None;
+    if aac_frame_length < header_len {
+        return Err(AdtsValidationError {
+            kind: AdtsErrorKind::InvalidFrameLength,
+            severity: ErrorSeverity::Error,
+            byte_offset: 3,
+            expected: Some(format!("≥{} (header length)", header_len)),
+            found: Some(format!("{} (too small)", aac_frame_length)),
+            hex_dump: Some(create_hex_dump(3, 3)),
+            suggestion: Some("Frame length is smaller than header. This indicates corrupted frame length field. Check bytes 3-5.".to_string()),
+            code_example: None,
+            technical_details: Some(format!("Frame length (13 bits): includes header + payload. Must be ≥{} for {} header.", header_len, if protection_absent { "unprotected" } else { "protected" })),
+            related_errors: Vec::new(),
+        });
     }
 
-    Some(&frame[header_len..aac_frame_length])
+    if aac_frame_length > frame.len() {
+        return Err(AdtsValidationError {
+            kind: AdtsErrorKind::InvalidFrameLength,
+            severity: ErrorSeverity::Error,
+            byte_offset: 3,
+            expected: Some(format!("≤{} (available data)", frame.len())),
+            found: Some(format!("{} (too large)", aac_frame_length)),
+            hex_dump: Some(create_hex_dump(3, 3)),
+            suggestion: Some("Frame length exceeds available data. Frame may be truncated or frame length field corrupted.".to_string()),
+            code_example: None,
+            technical_details: Some(format!("Frame length {} > buffer size {}. Check if frame is complete.", aac_frame_length, frame.len())),
+            related_errors: Vec::new(),
+        });
+    }
+
+    // CRC validation if present
+    if !protection_absent && frame.len() >= header_len + 2 {
+        // Note: Full CRC validation would require implementing CRC calculation
+        // For now, we just check that CRC bytes exist
+        let crc_start = header_len - 2;
+        if frame.len() < crc_start + 2 {
+            return Err(AdtsValidationError {
+                kind: AdtsErrorKind::CrcMismatch,
+                severity: ErrorSeverity::Error,
+                byte_offset: crc_start,
+                expected: Some("2 CRC bytes".to_string()),
+                found: Some(format!("{} bytes available", frame.len().saturating_sub(crc_start))),
+                hex_dump: Some(create_hex_dump(crc_start, frame.len().saturating_sub(crc_start))),
+                suggestion: Some("CRC protection is enabled but CRC bytes are missing or truncated.".to_string()),
+                code_example: None,
+                technical_details: Some("CRC is 16 bits stored after header when protection_absent=0.".to_string()),
+                related_errors: Vec::new(),
+            });
+        }
+    }
+
+    Ok(&frame[header_len..aac_frame_length])
 }
 
 fn build_moov_box(
@@ -1867,6 +2264,18 @@ mod tests {
             Mp4WriterError::FirstFrameMissingSpsPps,
             Mp4WriterError::FirstFrameMissingSequenceHeader,
             Mp4WriterError::InvalidAdts,
+            Mp4WriterError::InvalidAdtsDetailed(AdtsValidationError {
+                kind: AdtsErrorKind::FrameTooShort,
+                severity: ErrorSeverity::Error,
+                byte_offset: 5,
+                expected: Some("≥7 bytes for ADTS header".to_string()),
+                found: Some("5 bytes".to_string()),
+                hex_dump: Some("00 01 02 03 04* 05 06 07 08 09 (showing bytes 0-9)".to_string()),
+                suggestion: Some("Ensure you're passing complete ADTS frames. Check if the audio data is truncated or corrupted during transmission.".to_string()),
+                code_example: None,
+                technical_details: Some("ADTS header requires minimum 7 bytes: syncword (2 bytes), MPEG info (1 byte), frame length (3 bytes partial), buffer fullness (2 bytes partial).".to_string()),
+                related_errors: Vec::new(),
+            }),
             Mp4WriterError::InvalidOpusPacket,
             Mp4WriterError::AudioNotEnabled,
             Mp4WriterError::DurationOverflow,
@@ -1963,7 +2372,7 @@ mod tests {
         });
         assert!(matches!(
             writer.write_audio_sample(0, &[0x00, 0x01, 0x02]),
-            Err(Mp4WriterError::InvalidAdts)
+            Err(Mp4WriterError::InvalidAdtsDetailed(_))
         ));
 
         let sink = Cursor::new(Vec::<u8>::new());

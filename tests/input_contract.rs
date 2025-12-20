@@ -308,7 +308,7 @@ fn audio_invalid_adts_is_rejected() {
         .write_audio(0.0, &[0x00, 0x01, 0x02, 0x03])
         .unwrap_err();
 
-    assert!(matches!(err, MuxerError::InvalidAdts { frame_index: 0 }));
+    assert!(matches!(err, MuxerError::InvalidAdtsDetailed { frame_index: 0, .. }));
 
     let msg = err.to_string();
     assert!(

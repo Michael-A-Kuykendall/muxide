@@ -408,6 +408,8 @@ pub enum MuxerError {
     FirstAv1FrameMissingSequenceHeader,
     /// Audio sample is not a valid ADTS frame.
     InvalidAdts { frame_index: u64 },
+    /// Audio sample has detailed ADTS validation errors.
+    InvalidAdtsDetailed { frame_index: u64, error: crate::muxer::mp4::AdtsValidationError },
     /// Audio sample is not a valid Opus packet.
     InvalidOpusPacket { frame_index: u64 },
     /// DTS must be monotonically increasing.
@@ -485,6 +487,9 @@ impl fmt::Display for MuxerError {
             MuxerError::InvalidAdts { frame_index } => {
                 write!(f, "audio frame {} is not valid ADTS: ensure the frame starts with 0xFFF sync word",
                        frame_index)
+            }
+            MuxerError::InvalidAdtsDetailed { frame_index, error } => {
+                write!(f, "audio frame {} ADTS validation failed: {}", frame_index, error)
             }
             MuxerError::InvalidOpusPacket { frame_index } => {
                 write!(f, "audio frame {} is not a valid Opus packet: ensure the frame has valid TOC byte",
@@ -694,6 +699,7 @@ impl<Writer: Write> Muxer<Writer> {
                 MuxerError::FirstAv1FrameMissingSequenceHeader
             }
             Mp4WriterError::InvalidAdts => MuxerError::InvalidAdts { frame_index },
+            Mp4WriterError::InvalidAdtsDetailed(error) => MuxerError::InvalidAdtsDetailed { frame_index, error },
             Mp4WriterError::InvalidOpusPacket => MuxerError::InvalidOpusPacket { frame_index },
             Mp4WriterError::AudioNotEnabled => MuxerError::AudioNotConfigured,
             Mp4WriterError::DurationOverflow => MuxerError::Io(std::io::Error::new(

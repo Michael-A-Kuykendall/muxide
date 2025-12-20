@@ -114,7 +114,7 @@ fn errors_are_specific_and_descriptive() -> Result<(), Box<dyn std::error::Error
             .build()?;
         muxer.write_video(0.0, &frame0, true)?;
         let err = muxer.write_audio(0.0, &[0, 1, 2, 3]).unwrap_err();
-        assert!(matches!(err, MuxerError::InvalidAdts { .. }));
+        assert!(matches!(err, MuxerError::InvalidAdtsDetailed { .. }));
         assert!(err.to_string().contains("ADTS"));
     }
 
