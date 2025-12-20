@@ -1,4 +1,4 @@
-use muxide::api::{AudioCodec, MuxerBuilder, MuxerError, VideoCodec};
+use muxide::api::{AacProfile, AudioCodec, MuxerBuilder, MuxerError, VideoCodec};
 use std::{fs, path::Path};
 
 mod support;
@@ -96,7 +96,7 @@ fn errors_are_specific_and_descriptive() -> Result<(), Box<dyn std::error::Error
         let (writer, _) = SharedBuffer::new();
         let mut muxer = MuxerBuilder::new(writer)
             .video(VideoCodec::H264, 640, 480, 30.0)
-            .audio(AudioCodec::Aac, 48_000, 2)
+            .audio(AudioCodec::Aac(AacProfile::Lc), 48_000, 2)
             .build()?;
         let err = muxer
             .write_audio(0.0, &[0xff, 0xf1, 0x4c, 0x80, 0x01, 0x3f, 0xfc])
@@ -110,7 +110,7 @@ fn errors_are_specific_and_descriptive() -> Result<(), Box<dyn std::error::Error
         let (writer, _) = SharedBuffer::new();
         let mut muxer = MuxerBuilder::new(writer)
             .video(VideoCodec::H264, 640, 480, 30.0)
-            .audio(AudioCodec::Aac, 48_000, 2)
+            .audio(AudioCodec::Aac(AacProfile::Lc), 48_000, 2)
             .build()?;
         muxer.write_video(0.0, &frame0, true)?;
         let err = muxer.write_audio(0.0, &[0, 1, 2, 3]).unwrap_err();

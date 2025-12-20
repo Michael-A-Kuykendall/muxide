@@ -1,6 +1,6 @@
 mod support;
 
-use muxide::api::{AudioCodec, MuxerBuilder, VideoCodec};
+use muxide::api::{AacProfile, AudioCodec, MuxerBuilder, VideoCodec};
 use std::{fs, path::Path};
 use support::SharedBuffer;
 
@@ -55,7 +55,7 @@ fn finish_is_deterministic_for_same_inputs() -> Result<(), Box<dyn std::error::E
     let (w1, b1) = SharedBuffer::new();
     let mut m1 = MuxerBuilder::new(w1)
         .video(VideoCodec::H264, 640, 480, 30.0)
-        .audio(AudioCodec::Aac, 48_000, 2)
+        .audio(AudioCodec::Aac(AacProfile::Lc), 48_000, 2)
         .build()?;
 
     m1.write_video(0.0, &v0, true)?;
@@ -69,7 +69,7 @@ fn finish_is_deterministic_for_same_inputs() -> Result<(), Box<dyn std::error::E
     let (w2, b2) = SharedBuffer::new();
     let mut m2 = MuxerBuilder::new(w2)
         .video(VideoCodec::H264, 640, 480, 30.0)
-        .audio(AudioCodec::Aac, 48_000, 2)
+        .audio(AudioCodec::Aac(AacProfile::Lc), 48_000, 2)
         .build()?;
 
     m2.write_video(0.0, &v0, true)?;

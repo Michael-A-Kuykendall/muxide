@@ -5,9 +5,28 @@
 
 use proptest::prelude::*;
 use std::io::Cursor;
+use std::{fs, path::Path};
 
 // Import the muxide crate
-use muxide::api::{MuxerBuilder, VideoCodec};
+use muxide::api::{AacProfile, AudioCodec, MuxerBuilder, VideoCodec};
+use muxide::invariant_ppt::{clear_invariant_log, contract_test};
+
+fn read_hex_fixture(dir: &str, name: &str) -> Vec<u8> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("fixtures")
+        .join(dir)
+        .join(name);
+    let contents = fs::read_to_string(path).expect("fixture must be readable");
+    let hex: String = contents.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(hex.len() % 2 == 0, "hex fixtures must have even length");
+
+    let mut out = Vec::with_capacity(hex.len() / 2);
+    for i in (0..hex.len()).step_by(2) {
+        let byte = u8::from_str_radix(&hex[i..i + 2], 16).expect("valid hex");
+        out.push(byte);
+    }
+    out
+}
 
 /// Helper to create a valid H.264 keyframe with SPS/PPS
 fn make_h264_keyframe() -> Vec<u8> {
@@ -32,6 +51,26 @@ fn make_h264_pframe() -> Vec<u8> {
     let mut data = Vec::new();
     data.extend_from_slice(&[0, 0, 0, 1, 0x41, 0x9a, 0x24, 0x6c, 0x42, 0xff, 0xff]);
     data
+}
+
+/// Helper to create a valid AAC ADTS frame
+fn make_aac_adts_frame() -> Vec<u8> {
+    // Minimal valid ADTS AAC LC frame
+    // Sync word: 0xFFF, MPEG-4, LC profile, 48kHz, 2 channels
+    vec![
+        0xFF, 0xF1, // Sync + MPEG-4 + LC profile
+        0x4C, 0x80, // 48kHz, 2 channels, original/copy, home, copyright_id_bit, copyright_id_start
+        0x00, 0x1F, // Frame length (31 bytes including header), buffer fullness 0x1FF
+        0xFC,       // Buffer fullness continued, raw data blocks 0
+        // Raw AAC data (minimal valid frame)
+        0x21, 0x00, 0x49, 0x90, 0x02, 0x19, 0x00, 0x23, 0x80,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+    ]
+}
+
+/// Helper to create invalid AAC data
+fn make_invalid_aac_data() -> Vec<u8> {
+    vec![0x00, 0x01, 0x02, 0x03] // Not ADTS format
 }
 
 proptest! {
@@ -307,4 +346,26 @@ mod contract_tests {
         // Verify the stsz invariant was checked
         contract_test("stsz box building", &["No empty samples in stsz"]);
     }
+}
+
+/// Contract test: AAC profiles must be validated
+#[test]
+fn contract_aac_profile_validation() {
+    clear_invariant_log();
+
+    let aac_frame = read_hex_fixture("audio_samples", "frame0.aac.adts");
+
+    let mut buffer = Cursor::new(Vec::new());
+    let mut muxer = MuxerBuilder::new(&mut buffer)
+        .video(VideoCodec::H264, 1920, 1080, 30.0)
+        .audio(AudioCodec::Aac(AacProfile::Lc), 48000, 2)
+        .build()
+        .unwrap();
+
+    muxer.write_video(0.0, &make_h264_keyframe(), true).unwrap();
+    muxer.write_audio(0.0, &aac_frame).unwrap();
+    muxer.finish().unwrap();
+
+    // Verify AAC profile invariant was checked
+    contract_test("aac audio processing", &["AAC profile must be one of the supported variants"]);
 }

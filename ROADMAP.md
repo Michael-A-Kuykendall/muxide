@@ -15,19 +15,18 @@ Its mission is **simple muxing done right**: encoded frames in, playable MP4 out
 - ✅ Property-based test suite
 - ✅ Published to crates.io
 
-## Next Goals (v0.2.0)
-- [ ] Subtitle track support (WebVTT/TTML in mp4)
-- [ ] Chapter markers for long recordings
-- [ ] Multiple video track support
-- [ ] Improved error messages with byte offsets
-- [ ] `no_std` support (optional, behind feature flag)
+## Next Goals (v0.2.0) - Quality Differentiation
+- [ ] CLI tool for immediate developer utility
+- [ ] VP9 video codec support (complement AV1)
+- [ ] Performance benchmarks and SIMD optimizations
+- [ ] Enhanced documentation with real-world examples
+- [ ] Async I/O support (optional feature flag)
+- [ ] Chapter marker metadata support
 
 ## Future Possibilities (v0.3.0+)
-- [ ] VP9 video codec support
-- [ ] FLAC audio codec support
-- [ ] Edit lists for gapless audio
-- [ ] Encryption support (CENC/CBCS)
-- [ ] Muxer statistics and diagnostics API
+- [ ] DASH manifest generation
+- [ ] Hardware-accelerated muxing
+- [ ] Plugin system for custom codecs
 
 ## Non-Goals
 - **Encoding/decoding** - Muxide is a muxer only, bring your own codec

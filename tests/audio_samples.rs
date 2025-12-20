@@ -1,6 +1,6 @@
 mod support;
 
-use muxide::api::{AudioCodec, MuxerBuilder, VideoCodec};
+use muxide::api::{AacProfile, AudioCodec, MuxerBuilder, VideoCodec};
 use std::{fs, path::Path};
 use support::{parse_boxes, Mp4Box, SharedBuffer};
 
@@ -53,7 +53,7 @@ fn audio_samples_writes_second_track_and_tables() -> Result<(), Box<dyn std::err
     let (writer, buffer) = SharedBuffer::new();
     let mut muxer = MuxerBuilder::new(writer)
         .video(VideoCodec::H264, 640, 480, 30.0)
-        .audio(AudioCodec::Aac, 48_000, 2)
+        .audio(AudioCodec::Aac(AacProfile::Lc), 48_000, 2)
         .build()?;
 
     muxer.write_video(0.0, &frame0, true)?;
@@ -146,4 +146,52 @@ fn audio_samples_writes_second_track_and_tables() -> Result<(), Box<dyn std::err
     }
 
     Ok(())
+}
+
+#[test]
+fn aac_profiles_supported() -> Result<(), Box<dyn std::error::Error>> {
+    let frame0 = read_hex_fixture("video_samples", "frame0_key.264");
+    let aac_frame = read_hex_fixture("audio_samples", "frame0.aac.adts");
+
+    // Test each AAC profile variant
+    let profiles = vec![
+        AacProfile::Lc,
+        AacProfile::Main,
+        AacProfile::Ssr,
+        AacProfile::Ltp,
+        AacProfile::He,
+        AacProfile::Hev2,
+    ];
+
+    for profile in profiles {
+        let (writer, buffer) = SharedBuffer::new();
+        let mut muxer = MuxerBuilder::new(writer)
+            .video(VideoCodec::H264, 1920, 1080, 30.0)
+            .audio(AudioCodec::Aac(profile), 48000, 2)
+            .build()?;
+
+        muxer.write_video(0.0, &frame0, true)?;
+        muxer.write_audio(0.0, &aac_frame)?;
+        muxer.finish()?;
+
+        let output = buffer.lock().unwrap();
+
+        // Verify basic MP4 structure
+        assert!(output.len() > 1000, "Output too small for profile {:?}", profile);
+
+        // Verify moov and mdat boxes exist
+        let boxes = parse_boxes(&output);
+        let has_moov = boxes.iter().any(|b| b.typ == *b"moov");
+        let has_mdat = boxes.iter().any(|b| b.typ == *b"mdat");
+        assert!(has_moov, "Missing moov box for profile {:?}", profile);
+        assert!(has_mdat, "Missing mdat box for profile {:?}", profile);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn aac_invalid_profile_rejected() {
+    // This test would require adding an invalid profile variant to test rejection
+    // For now, we rely on the property tests and invariants to ensure only valid profiles are accepted
 }

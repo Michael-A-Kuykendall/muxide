@@ -5,7 +5,7 @@
 
 mod support;
 
-use muxide::api::{AudioCodec, MuxerBuilder, MuxerError, VideoCodec};
+use muxide::api::{AacProfile, AudioCodec, MuxerBuilder, MuxerError, VideoCodec};
 use std::{fs, path::Path};
 use support::SharedBuffer;
 
@@ -185,7 +185,7 @@ fn audio_pts_negative_is_rejected() {
     let (writer, _) = SharedBuffer::new();
     let mut muxer = MuxerBuilder::new(writer)
         .video(VideoCodec::H264, 640, 480, 30.0)
-        .audio(AudioCodec::Aac, 48000, 2)
+        .audio(AudioCodec::Aac(AacProfile::Lc), 48000, 2)
         .build()
         .unwrap();
 
@@ -205,7 +205,7 @@ fn audio_pts_decreasing_is_rejected() {
     let (writer, _) = SharedBuffer::new();
     let mut muxer = MuxerBuilder::new(writer)
         .video(VideoCodec::H264, 640, 480, 30.0)
-        .audio(AudioCodec::Aac, 48000, 2)
+        .audio(AudioCodec::Aac(AacProfile::Lc), 48000, 2)
         .build()
         .unwrap();
 
@@ -227,7 +227,7 @@ fn audio_before_first_video_is_rejected() {
     let (writer, _) = SharedBuffer::new();
     let mut muxer = MuxerBuilder::new(writer)
         .video(VideoCodec::H264, 640, 480, 30.0)
-        .audio(AudioCodec::Aac, 48000, 2)
+        .audio(AudioCodec::Aac(AacProfile::Lc), 48000, 2)
         .build()
         .unwrap();
 
@@ -252,7 +252,7 @@ fn audio_pts_before_first_video_pts_is_rejected() {
     let (writer, _) = SharedBuffer::new();
     let mut muxer = MuxerBuilder::new(writer)
         .video(VideoCodec::H264, 640, 480, 30.0)
-        .audio(AudioCodec::Aac, 48000, 2)
+        .audio(AudioCodec::Aac(AacProfile::Lc), 48000, 2)
         .build()
         .unwrap();
 
@@ -277,7 +277,7 @@ fn audio_empty_frame_is_rejected() {
     let (writer, _) = SharedBuffer::new();
     let mut muxer = MuxerBuilder::new(writer)
         .video(VideoCodec::H264, 640, 480, 30.0)
-        .audio(AudioCodec::Aac, 48000, 2)
+        .audio(AudioCodec::Aac(AacProfile::Lc), 48000, 2)
         .build()
         .unwrap();
 
@@ -297,7 +297,7 @@ fn audio_invalid_adts_is_rejected() {
     let (writer, _) = SharedBuffer::new();
     let mut muxer = MuxerBuilder::new(writer)
         .video(VideoCodec::H264, 640, 480, 30.0)
-        .audio(AudioCodec::Aac, 48000, 2)
+        .audio(AudioCodec::Aac(AacProfile::Lc), 48000, 2)
         .build()
         .unwrap();
 

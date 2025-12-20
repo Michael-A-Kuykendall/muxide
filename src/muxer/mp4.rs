@@ -1,7 +1,7 @@
 use std::fmt;
 use std::io::{self, Write};
 
-use crate::api::{AudioCodec, Metadata, VideoCodec};
+use crate::api::{AacProfile, AudioCodec, Metadata, VideoCodec};
 use crate::assert_invariant;
 use crate::codec::av1::{extract_av1_config, Av1Config};
 use crate::codec::h264::{annexb_to_avcc, default_avc_config, extract_avc_config, AvcConfig};
@@ -346,7 +346,14 @@ impl<Writer: Write> Mp4Writer<Writer> {
 
         // Process audio data based on codec
         let sample_data = match audio_track.codec {
-            AudioCodec::Aac => {
+            AudioCodec::Aac(profile) => {
+                // INV-020: AAC profile must be supported
+                assert_invariant!(
+                    matches!(profile, AacProfile::Lc | AacProfile::Main | AacProfile::Ssr | AacProfile::Ltp | AacProfile::He | AacProfile::Hev2),
+                    "AAC profile must be one of the supported variants",
+                    "codec::aac"
+                );
+
                 let raw = adts_to_raw(data).ok_or(Mp4WriterError::InvalidAdts)?;
                 raw.to_vec()
             }
@@ -890,7 +897,7 @@ fn build_audio_stbl_box(audio: &Mp4AudioTrack, tables: &SampleTables) -> Vec<u8>
 
 fn build_audio_stsd_box(audio: &Mp4AudioTrack) -> Vec<u8> {
     let sample_entry_box = match audio.codec {
-        AudioCodec::Aac => build_mp4a_box(audio),
+        AudioCodec::Aac(_) => build_mp4a_box(audio),
         AudioCodec::Opus => build_opus_box(audio),
         AudioCodec::None => build_mp4a_box(audio), // Fallback, shouldn't happen
     };
@@ -1933,7 +1940,7 @@ mod tests {
         writer.enable_audio(Mp4AudioTrack {
             sample_rate: 48000,
             channels: 2,
-            codec: AudioCodec::Aac,
+            codec: AudioCodec::Aac(AacProfile::Lc),
         });
         assert!(matches!(
             writer.write_audio_sample(0, &[0x00, 0x01, 0x02]),

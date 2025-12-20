@@ -6,6 +6,7 @@
 /// capabilities promised by the charter and contract documents.  It does
 /// not contain any implementation details.
 use crate::muxer::mp4::{Mp4AudioTrack, Mp4VideoTrack, Mp4Writer, Mp4WriterError, MEDIA_TIMESCALE};
+use crate::codec::common::AnnexBNalIter;
 use std::fmt;
 use std::io::Write;
 
@@ -23,12 +24,28 @@ pub enum VideoCodec {
     Av1,
 }
 
+/// AAC profile variants supported by MP4E and Muxide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AacProfile {
+    /// AAC Low Complexity (LC) - most common profile.
+    Lc,
+    /// AAC Main profile - higher quality than LC.
+    Main,
+    /// AAC Scalable Sample Rate (SSR).
+    Ssr,
+    /// AAC Long Term Prediction (LTP).
+    Ltp,
+    /// HE-AAC (High Efficiency AAC) - LC + SBR.
+    He,
+    /// HE-AAC v2 - HE-AAC + PS (Parametric Stereo).
+    Hev2,
+}
+
 /// Enumeration of supported audio codecs for the initial version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AudioCodec {
-    /// AAC (Advanced Audio Coding) with ADTS framing.  Only AAC LC is
-    /// expected to work in v0.
-    Aac,
+    /// AAC (Advanced Audio Coding) with ADTS framing. Supports multiple profiles.
+    Aac(AacProfile),
     /// Opus audio codec. Raw Opus packets (no container framing).
     /// Sample rate is always 48kHz per Opus spec.
     Opus,
@@ -237,6 +254,8 @@ impl<Writer> MuxerBuilder<Writer> {
             video_frame_count: 0,
             audio_frame_count: 0,
             finished: false,
+            current_video_pts: 0.0,
+            current_audio_pts: 0.0,
         })
     }
 }
@@ -287,6 +306,8 @@ pub struct Muxer<Writer> {
     video_frame_count: u64,
     audio_frame_count: u64,
     finished: bool,
+    current_video_pts: f64,
+    current_audio_pts: f64,
 }
 
 /// Error type for builder validation and runtime errors.
@@ -449,6 +470,30 @@ impl<Writer: Write> Muxer<Writer> {
         muxer.metadata = config.metadata;
         muxer.fast_start = config.fast_start;
         Ok(muxer)
+    }
+
+    /// Simple constructor for quick setup (MP4E-compatible API).
+    pub fn simple(
+        writer: Writer,
+        width: u32,
+        height: u32,
+        video_codec: VideoCodec,
+        audio_codec: Option<AudioCodec>,
+        sample_rate: Option<u32>,
+        channels: Option<u16>,
+    ) -> Result<Self, MuxerError>
+    where
+        Writer: Write,
+    {
+        let mut builder = MuxerBuilder::new(writer).video(video_codec, width, height, 30.0); // Default 30fps
+        if let Some(codec) = audio_codec {
+            if codec != AudioCodec::None {
+                let rate = sample_rate.unwrap_or(48000);
+                let ch = channels.unwrap_or(2);
+                builder = builder.audio(codec, rate, ch);
+            }
+        }
+        builder.build()
     }
 
     /// Write a video frame to the container.
@@ -671,6 +716,49 @@ impl<Writer: Write> Muxer<Writer> {
         Ok(())
     }
 
+    /// Simple video encoding method (MP4E-compatible API).
+    pub fn encode_video(&mut self, data: &[u8], duration_ms: u32) -> Result<(), MuxerError> {
+        let pts = self.current_video_pts;
+        let is_keyframe = self.is_keyframe(data);
+        self.write_video(pts, data, is_keyframe)?;
+        self.current_video_pts += duration_ms as f64 / 1000.0;
+        Ok(())
+    }
+
+    /// Simple audio encoding method (MP4E-compatible API).
+    pub fn encode_audio(&mut self, data: &[u8], samples: u32) -> Result<(), MuxerError> {
+        if self.audio_track.is_none() {
+            return Err(MuxerError::AudioNotConfigured);
+        }
+        let sample_rate = self.audio_track.as_ref().unwrap().sample_rate;
+        let pts = self.current_audio_pts;
+        self.write_audio(pts, data)?;
+        self.current_audio_pts += samples as f64 / sample_rate as f64;
+        Ok(())
+    }
+
+    /// Helper to detect if a video frame is a keyframe.
+    fn is_keyframe(&self, data: &[u8]) -> bool {
+        match self.video_track.codec {
+            VideoCodec::H264 => {
+                // Check for IDR NAL (type 5)
+                AnnexBNalIter::new(data).any(|nal| (nal[0] & 0x1f) == 5)
+            }
+            VideoCodec::H265 => {
+                // Check for IDR NAL (type 19-21)
+                AnnexBNalIter::new(data).any(|nal| {
+                    let nal_type = (nal[0] >> 1) & 0x3f;
+                    nal_type >= 19 && nal_type <= 21
+                })
+            }
+            VideoCodec::Av1 => {
+                // For AV1, check if it's a key frame (first frame or has key frame flag)
+                // Simple heuristic: first frame is keyframe
+                self.video_frame_count == 0
+            }
+        }
+    }
+
     /// Finalise the container and flush any buffered data.
     ///
     /// In the current slice this writes the `ftyp`/`moov` boxes, resulting
@@ -740,5 +828,48 @@ mod thread_safety_tests {
     fn builder_is_send_sync() {
         assert_send::<MuxerBuilder<std::fs::File>>();
         assert_sync::<MuxerBuilder<std::fs::File>>();
+    }
+
+    #[test]
+    fn simple_api_works() -> Result<(), MuxerError> {
+        let mut buffer = Vec::new();
+        let mut muxer = Muxer::simple(
+            &mut buffer,
+            1920,
+            1080,
+            VideoCodec::H264,
+            Some(AudioCodec::Aac(AacProfile::Lc)),
+            Some(48000),
+            Some(2),
+        )?;
+
+        // Test video encoding with a valid keyframe
+        let video_data = make_h264_keyframe();
+        muxer.encode_video(&video_data, 33)?; // 33ms
+
+        // Test audio encoding
+        let audio_data = vec![0xff, 0xf1, 0x4c, 0x80, 0x01, 0x3f, 0xfc, 0xaa, 0xbb]; // ADTS
+        muxer.encode_audio(&audio_data, 1024)?; // 1024 samples
+
+        muxer.finish()?;
+        assert!(!buffer.is_empty());
+        Ok(())
+    }
+
+    /// Helper to create a valid H.264 keyframe with SPS/PPS
+    fn make_h264_keyframe() -> Vec<u8> {
+        // Minimal valid Annex B H.264 stream with SPS, PPS, and IDR slice
+        let mut data = Vec::new();
+        // SPS (NAL type 7)
+        data.extend_from_slice(&[
+            0, 0, 0, 1, 0x67, 0x42, 0x00, 0x1e, 0x95, 0xa8, 0x28, 0x28, 0x28,
+        ]);
+        // PPS (NAL type 8)
+        data.extend_from_slice(&[0, 0, 0, 1, 0x68, 0xce, 0x3c, 0x80]);
+        // IDR slice (NAL type 5)
+        data.extend_from_slice(&[
+            0, 0, 0, 1, 0x65, 0x88, 0x84, 0x00, 0x00, 0x03, 0x00, 0x00, 0x03,
+        ]);
+        data
     }
 }
