@@ -5,6 +5,9 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM UTC
+  workflow_dispatch:  # Temporary for testing
 
 env:
   CARGO_TERM_COLOR: always
@@ -37,8 +40,36 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
       
-      - name: Run tests
-        run: cargo test --all-features
+      - name: Run unit tests (fast feedback)
+        run: cargo test --lib
+      
+      - name: Run property tests (comprehensive)
+        run: cargo test --test property_tests
+        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+
+  nightly:
+    name: Nightly Comprehensive Testing
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-nightly-${{ hashFiles('**/Cargo.lock') }}
+      
+      - name: Run extended property tests
+        run: cargo test --test property_tests
+        env:
+          PROPTEST_CASES: 1000  # More test cases for nightly
 
   fmt:
     name: Formatting
