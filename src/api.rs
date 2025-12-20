@@ -25,7 +25,7 @@ pub enum VideoCodec {
     Av1,
 }
 
-/// AAC profile variants supported by MP4E and Muxide.
+/// AAC profile variants supported by Muxide.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AacProfile {
     /// AAC Low Complexity (LC) - most common profile.
@@ -209,15 +209,27 @@ impl<Writer> MuxerBuilder<Writer> {
         self
     }
 
-    /// Set creation time for the media file (MP4E compatibility method)
+    /// Set creation time for the media file
     pub fn set_create_time(mut self, unix_timestamp: u64) -> Self {
         self.metadata.get_or_insert_with(Metadata::default).creation_time = Some(unix_timestamp);
         self
     }
 
-    /// Set language code for the media file (MP4E compatibility method)
+    /// Set language code for the media file
     pub fn set_language(mut self, language: impl Into<String>) -> Self {
         self.metadata.get_or_insert_with(Metadata::default).language = Some(language.into());
+        self
+    }
+
+    /// Set video track parameters
+    pub fn set_video_track(mut self, codec: VideoCodec, width: u32, height: u32, framerate: f64) -> Self {
+        self.video = Some((codec, width, height, framerate));
+        self
+    }
+
+    /// Set audio track parameters
+    pub fn set_audio_track(mut self, codec: AudioCodec, sample_rate: u32, channels: u16) -> Self {
+        self.audio = Some((codec, sample_rate, channels));
         self
     }
 
@@ -280,7 +292,7 @@ impl<Writer> MuxerBuilder<Writer> {
         })
     }
 
-    /// Create a fragmented MP4 muxer (MP4E compatibility method).
+    /// Create a fragmented MP4 muxer.
     ///
     /// This is a convenience method that creates a `FragmentedMuxer` with
     /// the configuration from this builder. Only video configuration is
@@ -528,7 +540,7 @@ impl<Writer: Write> Muxer<Writer> {
         Ok(muxer)
     }
 
-    /// Simple constructor for quick setup (MP4E-compatible API).
+    /// Simple constructor for quick setup.
     pub fn simple(
         writer: Writer,
         width: u32,
@@ -773,7 +785,7 @@ impl<Writer: Write> Muxer<Writer> {
         Ok(())
     }
 
-    /// Simple video encoding method (MP4E-compatible API).
+    /// Simple video encoding method.
     pub fn encode_video(&mut self, data: &[u8], duration_ms: u32) -> Result<(), MuxerError> {
         let pts = self.current_video_pts;
         let is_keyframe = self.is_keyframe(data);
@@ -782,7 +794,7 @@ impl<Writer: Write> Muxer<Writer> {
         Ok(())
     }
 
-    /// Simple audio encoding method (MP4E-compatible API).
+    /// Simple audio encoding method.
     pub fn encode_audio(&mut self, data: &[u8], samples: u32) -> Result<(), MuxerError> {
         if self.audio_track.is_none() {
             return Err(MuxerError::AudioNotConfigured);
@@ -860,9 +872,7 @@ impl<Writer: Write> Muxer<Writer> {
         self.finish_in_place_with_stats()
     }
 
-    /// Flush the muxer and finalize the output (MP4E compatibility method).
-    ///
-    /// This is an alias for `finish()` to match MP4E's API.
+    /// Flush the muxer and finalize the output.
     pub fn flush(self) -> Result<(), MuxerError> {
         self.finish()
     }

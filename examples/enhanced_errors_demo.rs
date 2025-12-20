@@ -70,11 +70,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!();
-    println!("🎯 Key Improvements Over MP4E:");
-    println!("------------------------------");
-    println!("❌ MP4E: 'invalid ADTS'");
-    println!("✅ Muxide: Severity indicators + enhanced hex dumps + JSON output + error chaining");
-    println!();
     println!("📊 Error Message Components:");
     println!("• 🚨 Severity indicators (Error vs Warning)");
     println!("• 🎯 Specific validation failure type");

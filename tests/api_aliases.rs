@@ -1,4 +1,4 @@
-//! Test the new MP4E-compatible API methods
+//! Test the new API methods
 
 use muxide::api::{MuxerBuilder, VideoCodec};
 use muxide::fragmented::FragmentedMuxer;
