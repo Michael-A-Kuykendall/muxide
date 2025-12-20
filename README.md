@@ -2,6 +2,7 @@
   <img src="https://raw.githubusercontent.com/Michael-A-Kuykendall/muxide/main/assets/muxide-logo.png" alt="Muxide" width="350"><br>
   <strong>The last mile from encoder to playable MP4.</strong><br><br>
   <a href="https://crates.io/crates/muxide"><img src="https://img.shields.io/crates/v/muxide.svg" alt="Crates.io"></a>
+  <a href="https://crates.io/crates/muxide"><img src="https://img.shields.io/crates/d/muxide.svg" alt="Downloads"></a>
   <a href="https://docs.rs/muxide"><img src="https://docs.rs/muxide/badge.svg" alt="Documentation"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/MSRV-1.70-blue.svg" alt="MSRV"></a>
@@ -44,6 +45,37 @@ Muxide solves **one job cleanly**:
 > Take already-encoded frames with correct timestamps → produce a **standards-compliant, immediately-playable MP4** → using **pure Rust**.
 
 Nothing more. Nothing less.
+
+## Installation & Usage
+
+### As a Library
+```bash
+cargo add muxide
+```
+
+```rust
+use muxide::api::{MuxerBuilder, VideoCodec};
+
+let mut muxer = MuxerBuilder::new(file)
+    .video(VideoCodec::H264, 1920, 1080, 30.0)?
+    .build()?;
+
+// Write your encoded frames...
+muxer.write_video(0.0, &h264_frame, true)?;
+muxer.finish()?;
+```
+
+### As a CLI Tool
+```bash
+# Install globally
+cargo install muxide
+
+# Or download pre-built binary from releases
+# Then use:
+muxide --help
+```
+
+The CLI tool accepts raw encoded frames from stdin or files and produces MP4 output.
 
 ## Core Invariant
 
@@ -412,4 +444,4 @@ MIT — no GPL, no copyleft, no surprises.
 
 <p align="center">
   <em>Muxide is designed to be <strong>boring</strong> in the best way:<br>predictable, strict, fast, and invisible once integrated.</em>
-</p>
+</p># Test CI trigger
