@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2
+
+- **CLI Tool**: Complete command-line interface with progress bars, JSON output, and comprehensive muxing options
+- **Code Quality**: Comprehensive AI artifact cleanup, improved error handling patterns, and clippy compliance
+- **Documentation**: Enhanced README with professional presentation and complete feature documentation
+- **Release Polish**: Final production-ready codebase with all warnings addressed and comprehensive testing
+
 ## 0.1.1
 
 - **AAC Profile Support**: Complete implementation of all 6 AAC profiles (LC, Main, SSR, LTP, HE, HEv2)
