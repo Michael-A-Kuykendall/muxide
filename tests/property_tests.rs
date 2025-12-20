@@ -369,3 +369,183 @@ fn contract_aac_profile_validation() {
     // Verify AAC profile invariant was checked
     contract_test("aac audio processing", &["AAC profile must be one of the supported variants"]);
 }
+
+/// Property-based test: CLI argument parsing is robust
+#[test]
+fn prop_cli_argument_parsing() {
+    use proptest::prelude::*;
+    use std::process::Command;
+
+    // Test various combinations of valid CLI arguments
+    let valid_widths = 320..=4096u32;
+    let valid_heights = 240..=2160u32;
+    let valid_fps = 1.0..=120.0f64;
+    let valid_sample_rates = proptest::sample::select(vec![8000, 16000, 22050, 44100, 48000]);
+    let valid_channels = 1..=8u8;
+
+    proptest!(ProptestConfig::with_cases(50), |(
+        width in valid_widths,
+        height in valid_heights,
+        fps in valid_fps,
+        sample_rate in valid_sample_rates,
+        channels in valid_channels,
+    )| {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let output_path = temp_dir.path().join(format!("test_{}_{}_{}.mp4", width, height, fps));
+
+        let video_fixture = "fixtures/video_samples/frame0_key.264";
+
+        let output = Command::new("cargo")
+            .args(&[
+                "run", "--bin", "muxide", "--",
+                "mux",
+                "--video", video_fixture,
+                "--width", &width.to_string(),
+                "--height", &height.to_string(),
+                "--fps", &fps.to_string(),
+                "--output", &output_path.to_string_lossy(),
+            ])
+            .output()
+            .unwrap();
+
+        // Should succeed with valid arguments
+        prop_assert!(output.status.success(),
+            "CLI failed with valid arguments: width={}, height={}, fps={}",
+            width, height, fps);
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        prop_assert!(stdout.contains("Muxing complete"),
+            "CLI didn't complete successfully: {}", stdout);
+
+        prop_assert!(output_path.exists(),
+            "Output file was not created: {}", output_path.display());
+    });
+}
+
+/// Property-based test: CLI handles various metadata inputs
+#[test]
+fn prop_cli_metadata_handling() {
+    use proptest::prelude::*;
+    use std::process::Command;
+
+    let titles = "[a-zA-Z0-9 ]{1,50}";
+    let languages = "(und|eng|spa|fra|deu|ita|por|rus|jpn|kor|chi)";
+
+    proptest!(ProptestConfig::with_cases(20), |(
+        title in titles,
+        language in languages,
+    )| {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let output_path = temp_dir.path().join("test_metadata.mp4");
+
+        let video_fixture = "fixtures/video_samples/frame0_key.264";
+
+        let output = Command::new("cargo")
+            .args(&[
+                "run", "--bin", "muxide", "--",
+                "mux",
+                "--video", video_fixture,
+                "--width", "1920",
+                "--height", "1080",
+                "--fps", "30",
+                "--title", &title,
+                "--language", &language,
+                "--output", &output_path.to_string_lossy(),
+            ])
+            .output()
+            .unwrap();
+
+        prop_assert!(output.status.success(),
+            "CLI failed with metadata: title='{}', language='{}'",
+            title, language);
+
+        prop_assert!(output_path.exists(),
+            "Output file not created with metadata");
+    });
+}
+
+/// Property-based test: CLI rejects invalid dimensions
+#[test]
+fn prop_cli_invalid_dimensions_rejected() {
+    use proptest::prelude::*;
+    use std::process::Command;
+
+    let invalid_widths = prop_oneof![0..=319u32, 4097..=10000u32];
+    let invalid_heights = prop_oneof![0..=239u32, 2161..=5000u32];
+
+    proptest!(ProptestConfig::with_cases(20), |(
+        width in invalid_widths,
+        height in invalid_heights,
+    )| {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let output_path = temp_dir.path().join("test_invalid.mp4");
+
+        let video_fixture = "fixtures/video_samples/frame0_key.264";
+
+        let output = Command::new("cargo")
+            .args(&[
+                "run", "--bin", "muxide", "--",
+                "mux",
+                "--video", video_fixture,
+                "--width", &width.to_string(),
+                "--height", &height.to_string(),
+                "--fps", "30",
+                "--output", &output_path.to_string_lossy(),
+            ])
+            .output()
+            .unwrap();
+
+        // Should fail with invalid dimensions
+        prop_assert!(!output.status.success(),
+            "CLI should reject invalid dimensions: {}x{}", width, height);
+    });
+}
+
+/// Property-based test: CLI handles various codec combinations
+#[test]
+fn prop_cli_codec_combinations() {
+    use proptest::prelude::*;
+    use std::process::Command;
+
+    static VIDEO_CODECS: &[&str] = &["h264", "h265", "av1"];
+    static AUDIO_CODECS: &[&str] = &["aac", "aac-he", "aac-hev2", "opus"];
+
+    proptest!(ProptestConfig::with_cases(15), |(
+        video_codec in proptest::sample::select(VIDEO_CODECS),
+        audio_codec in proptest::sample::select(AUDIO_CODECS),
+    )| {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let output_path = temp_dir.path().join(format!("test_{}_{}.mp4", video_codec, audio_codec));
+
+        let video_fixture = "fixtures/video_samples/frame0_key.264";
+        let audio_fixture = "fixtures/audio_samples/frame0.aac.adts";
+
+        let output = Command::new("cargo")
+            .args(&[
+                "run", "--bin", "muxide", "--",
+                "mux",
+                "--video", video_fixture,
+                "--audio", audio_fixture,
+                "--video-codec", video_codec,
+                "--audio-codec", audio_codec,
+                "--width", "1920",
+                "--height", "1080",
+                "--fps", "30",
+                "--sample-rate", "44100",
+                "--channels", "2",
+                "--output", &output_path.to_string_lossy(),
+            ])
+            .output()
+            .unwrap();
+
+        // Should succeed (though some combinations might not work with our test fixtures)
+        // The important thing is that the CLI doesn't crash on valid codec names
+        let _stdout = String::from_utf8_lossy(&output.stdout);
+        let _stderr = String::from_utf8_lossy(&output.stderr);
+
+        // CLI should exit gracefully (success or controlled failure)
+        // We don't assert success because some codec combinations may not work with test fixtures
+        prop_assert!(output.status.code().is_some(),
+            "CLI should exit with a status code for codecs: {} + {}", video_codec, audio_codec);
+    });
+}

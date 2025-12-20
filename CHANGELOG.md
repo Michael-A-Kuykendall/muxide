@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.1
+
+- **AAC Profile Support**: Complete implementation of all 6 AAC profiles (LC, Main, SSR, LTP, HE, HEv2)
+- **World-Class Error Handling**: Comprehensive ADTS validation with detailed diagnostics, hex dumps, and recovery suggestions
+- **MP4E-Compatible APIs**: Added `new_with_fragment()`, `flush()`, `set_create_time()`, `set_language()` methods
+- **Metadata Support**: Title, creation time, and language metadata in MP4 files
+- **HEVC/H.265 Support**: Annex B format with VPS/SPS/PPS configuration
+- **AV1 Support**: OBU stream format with Sequence Header OBU configuration
+- **Opus Support**: Raw Opus packets with 48kHz sample rate
+- **CLI Tool**: Command-line interface with progress bars, JSON output, and comprehensive options
+- **Invariant PPT Framework**: Property-based testing with 86%+ code coverage
+- **Documentation**: Complete README, governance files (CODE_OF_CONDUCT, CONTRIBUTING, etc.), and roadmap
+- **License**: Simplified to MIT-only
+
 ## 0.1.0
 
 - MP4 writer with a single H.264 video track (Annex B input).

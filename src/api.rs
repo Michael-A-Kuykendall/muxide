@@ -25,6 +25,29 @@ pub enum VideoCodec {
     Av1,
 }
 
+impl fmt::Display for VideoCodec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            VideoCodec::H264 => write!(f, "H.264"),
+            VideoCodec::H265 => write!(f, "H.265"),
+            VideoCodec::Av1 => write!(f, "AV1"),
+        }
+    }
+}
+
+impl std::str::FromStr for VideoCodec {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "h264" | "h.264" | "avc" => Ok(VideoCodec::H264),
+            "h265" | "h.265" | "hevc" => Ok(VideoCodec::H265),
+            "av1" => Ok(VideoCodec::Av1),
+            _ => Err(format!("Unknown video codec: {}", s)),
+        }
+    }
+}
+
 /// AAC profile variants supported by Muxide.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AacProfile {
@@ -52,6 +75,47 @@ pub enum AudioCodec {
     Opus,
     /// No audio.  Use this variant when only video is being muxed.
     None,
+}
+
+impl fmt::Display for AudioCodec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AudioCodec::Aac(profile) => write!(f, "AAC-{}", profile),
+            AudioCodec::Opus => write!(f, "Opus"),
+            AudioCodec::None => write!(f, "None"),
+        }
+    }
+}
+
+impl fmt::Display for AacProfile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AacProfile::Lc => write!(f, "LC"),
+            AacProfile::Main => write!(f, "Main"),
+            AacProfile::Ssr => write!(f, "SSR"),
+            AacProfile::Ltp => write!(f, "LTP"),
+            AacProfile::He => write!(f, "HE"),
+            AacProfile::Hev2 => write!(f, "HEv2"),
+        }
+    }
+}
+
+impl std::str::FromStr for AudioCodec {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "aac" | "aac-lc" => Ok(AudioCodec::Aac(AacProfile::Lc)),
+            "aac-main" => Ok(AudioCodec::Aac(AacProfile::Main)),
+            "aac-ssr" => Ok(AudioCodec::Aac(AacProfile::Ssr)),
+            "aac-ltp" => Ok(AudioCodec::Aac(AacProfile::Ltp)),
+            "aac-he" => Ok(AudioCodec::Aac(AacProfile::He)),
+            "aac-hev2" => Ok(AudioCodec::Aac(AacProfile::Hev2)),
+            "opus" => Ok(AudioCodec::Opus),
+            "none" => Ok(AudioCodec::None),
+            _ => Err(format!("Unknown audio codec: {}", s)),
+        }
+    }
 }
 
 /// High-level muxer configuration intended for simple integrations (e.g. CrabCamera).
@@ -817,7 +881,7 @@ impl<Writer: Write> Muxer<Writer> {
                 // Check for IDR NAL (type 19-21)
                 AnnexBNalIter::new(data).any(|nal| {
                     let nal_type = (nal[0] >> 1) & 0x3f;
-                    nal_type >= 19 && nal_type <= 21
+                    (19..=21).contains(&nal_type)
                 })
             }
             VideoCodec::Av1 => {
@@ -945,5 +1009,143 @@ mod thread_safety_tests {
             0, 0, 0, 1, 0x65, 0x88, 0x84, 0x00, 0x00, 0x03, 0x00, 0x00, 0x03,
         ]);
         data
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metadata_new_creates_empty_metadata() {
+        let metadata = Metadata::new();
+        assert!(metadata.title.is_none());
+        assert!(metadata.language.is_none());
+        assert!(metadata.creation_time.is_none());
+    }
+
+    #[test]
+    fn metadata_with_title_sets_title() {
+        let metadata = Metadata::new().with_title("Test Title");
+        assert_eq!(metadata.title, Some("Test Title".to_string()));
+    }
+
+    #[test]
+    fn metadata_with_language_sets_language() {
+        let metadata = Metadata::new().with_language("eng");
+        assert_eq!(metadata.language, Some("eng".to_string()));
+    }
+
+    #[test]
+    fn metadata_with_creation_time_sets_timestamp() {
+        let metadata = Metadata::new().with_creation_time(1234567890);
+        assert_eq!(metadata.creation_time, Some(1234567890));
+    }
+
+    #[test]
+    fn metadata_with_current_time_sets_current_timestamp() {
+        let before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let metadata = Metadata::new().with_current_time();
+
+        let after = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        assert!(metadata.creation_time.is_some());
+        let time = metadata.creation_time.unwrap();
+        assert!(time >= before && time <= after);
+    }
+
+    #[test]
+    fn metadata_chaining_works() {
+        let metadata = Metadata::new()
+            .with_title("Test Movie")
+            .with_language("spa")
+            .with_creation_time(1000000000);
+
+        assert_eq!(metadata.title, Some("Test Movie".to_string()));
+        assert_eq!(metadata.language, Some("spa".to_string()));
+        assert_eq!(metadata.creation_time, Some(1000000000));
+    }
+
+    #[test]
+    fn muxer_config_new_creates_basic_config() {
+        let config = MuxerConfig::new(1920, 1080, 30.0);
+        assert_eq!(config.width, 1920);
+        assert_eq!(config.height, 1080);
+        assert_eq!(config.framerate, 30.0);
+        assert!(config.audio.is_none());
+        assert!(config.metadata.is_none());
+        assert!(config.fast_start);
+    }
+
+    #[test]
+    fn muxer_config_with_audio_sets_audio_config() {
+        let config = MuxerConfig::new(1920, 1080, 30.0)
+            .with_audio(AudioCodec::Aac(AacProfile::Lc), 48000, 2);
+
+        assert!(config.audio.is_some());
+        let audio = config.audio.unwrap();
+        assert!(matches!(audio.codec, AudioCodec::Aac(AacProfile::Lc)));
+        assert_eq!(audio.sample_rate, 48000);
+        assert_eq!(audio.channels, 2);
+    }
+
+    #[test]
+    fn muxer_config_with_audio_none_clears_audio() {
+        let config = MuxerConfig::new(1920, 1080, 30.0)
+            .with_audio(AudioCodec::Aac(AacProfile::Lc), 48000, 2)
+            .with_audio(AudioCodec::None, 0, 0);
+
+        assert!(config.audio.is_none());
+    }
+
+    #[test]
+    fn muxer_config_with_metadata_sets_metadata() {
+        let metadata = Metadata::new().with_title("Test");
+        let config = MuxerConfig::new(1920, 1080, 30.0)
+            .with_metadata(metadata);
+
+        assert!(config.metadata.is_some());
+        assert_eq!(config.metadata.unwrap().title, Some("Test".to_string()));
+    }
+
+    #[test]
+    fn muxer_config_with_fast_start_sets_fast_start() {
+        let config = MuxerConfig::new(1920, 1080, 30.0)
+            .with_fast_start(false);
+
+        assert!(!config.fast_start);
+    }
+
+    #[test]
+    fn muxer_config_chaining_works() {
+        let metadata = Metadata::new()
+            .with_title("Chained Test")
+            .with_language("eng");
+
+        let config = MuxerConfig::new(1280, 720, 24.0)
+            .with_audio(AudioCodec::Opus, 48000, 1)
+            .with_metadata(metadata)
+            .with_fast_start(false);
+
+        assert_eq!(config.width, 1280);
+        assert_eq!(config.height, 720);
+        assert_eq!(config.framerate, 24.0);
+        assert!(config.audio.is_some());
+        assert!(config.metadata.is_some());
+        assert!(!config.fast_start);
+
+        let audio = config.audio.unwrap();
+        assert!(matches!(audio.codec, AudioCodec::Opus));
+
+        let metadata = config.metadata.unwrap();
+        assert_eq!(metadata.title, Some("Chained Test".to_string()));
+        assert_eq!(metadata.language, Some("eng".to_string()));
     }
 }

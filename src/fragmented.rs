@@ -330,7 +330,7 @@ fn encode_language_code(language: &str) -> [u8; 2] {
     // ISO 639-2/T language codes are packed into 16 bits as (c1<<10) | (c2<<5) | c3
     // where each character is offset by 0x60
     let chars: Vec<char> = language.chars().take(3).collect();
-    let c1 = chars.get(0).copied().unwrap_or('u') as u16;
+    let c1 = chars.first().copied().unwrap_or('u') as u16;
     let c2 = chars.get(1).copied().unwrap_or('n') as u16;
     let c3 = chars.get(2).copied().unwrap_or('d') as u16;
     

@@ -853,4 +853,30 @@ mod tests {
         // Read next 2 bits: 01 = 1
         assert_eq!(reader.read_bits(2), Some(1));
     }
+
+    #[test]
+    fn test_parse_sequence_header_basic() {
+        // Minimal sequence header OBU
+        // OBU header: type=1 (SEQUENCE_HEADER), has_size=1 => 0x0A
+        // Size: 0x10 (16 bytes)
+        // Sequence header payload (simplified)
+        let seq_header = [
+            0x0A, 0x10, // OBU header + size
+            0x00, 0x00, 0x00, 0x00, // seq_profile=0, still_picture=0, reduced_still_picture_header=0
+            0x00, 0x00, 0x00, 0x00, // timing_info_present=0, decoder_model_info_present=0
+            0x00, 0x00, 0x00, 0x00, // initial_display_delay_present=0, operating_points_cnt_minus_1=0
+            0x00, 0x00, // operating_point_idc[0]=0, seq_level_idx[0]=0
+            0x00, // seq_tier[0]=0
+        ];
+
+        let config = parse_sequence_header(&seq_header[2..], 2);
+        assert!(config.is_some());
+        let cfg = config.unwrap();
+        assert_eq!(cfg.seq_profile, 0);
+        assert_eq!(cfg.seq_level_idx, 0);
+        assert_eq!(cfg.seq_tier, 0);
+        assert!(!cfg.high_bitdepth);
+        assert!(!cfg.twelve_bit);
+        assert!(!cfg.monochrome);
+    }
 }
