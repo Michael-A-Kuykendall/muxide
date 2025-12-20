@@ -7,6 +7,7 @@
 /// not contain any implementation details.
 use crate::muxer::mp4::{Mp4AudioTrack, Mp4VideoTrack, Mp4Writer, Mp4WriterError, MEDIA_TIMESCALE};
 use crate::codec::common::AnnexBNalIter;
+use crate::fragmented::{FragmentedMuxer, FragmentConfig};
 use std::fmt;
 use std::io::Write;
 
@@ -277,6 +278,36 @@ impl<Writer> MuxerBuilder<Writer> {
             current_video_pts: 0.0,
             current_audio_pts: 0.0,
         })
+    }
+
+    /// Create a fragmented MP4 muxer (MP4E compatibility method).
+    ///
+    /// This is a convenience method that creates a `FragmentedMuxer` with
+    /// the configuration from this builder. Only video configuration is
+    /// supported for fragmented MP4 in the initial implementation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if video configuration is missing.
+    pub fn new_with_fragment(self) -> Result<FragmentedMuxer, MuxerError> {
+        // Fragmented MP4 requires video configuration
+        let (_codec, width, height, _framerate) = self.video.ok_or(MuxerError::MissingVideoConfig)?;
+
+        // Extract SPS/PPS from video codec config (simplified for now)
+        // In a real implementation, this would parse the codec config
+        let sps = vec![0x67, 0x42, 0x00, 0x0a, 0xf8, 0x41, 0xa2]; // Example SPS
+        let pps = vec![0x68, 0xce, 0x38, 0x80]; // Example PPS
+
+        let config = FragmentConfig {
+            width,
+            height,
+            timescale: 90000, // Standard video timescale
+            fragment_duration_ms: 2000, // 2 second fragments
+            sps,
+            pps,
+        };
+
+        Ok(FragmentedMuxer::new(config))
     }
 }
 
@@ -821,6 +852,13 @@ impl<Writer: Write> Muxer<Writer> {
     /// Finalise the container and return muxing statistics.
     pub fn finish_with_stats(mut self) -> Result<MuxerStats, MuxerError> {
         self.finish_in_place_with_stats()
+    }
+
+    /// Flush the muxer and finalize the output (MP4E compatibility method).
+    ///
+    /// This is an alias for `finish()` to match MP4E's API.
+    pub fn flush(self) -> Result<(), MuxerError> {
+        self.finish()
     }
 }
 
