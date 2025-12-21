@@ -20,6 +20,7 @@
 //! ```
 
 use super::common::AnnexBNalIter;
+use crate::assert_invariant;
 
 /// H.264 NAL unit type constants.
 pub mod nal_type {
@@ -113,6 +114,10 @@ pub const DEFAULT_PPS: &[u8] = &[0x68, 0xce, 0x38, 0x80];
 /// assert_eq!(config.pps[0] & 0x1f, 8);  // PPS NAL type
 /// ```
 pub fn extract_avc_config(data: &[u8]) -> Option<AvcConfig> {
+    if data.is_empty() {
+        return None;
+    }
+
     let mut sps: Option<&[u8]> = None;
     let mut pps: Option<&[u8]> = None;
 
@@ -122,6 +127,13 @@ pub fn extract_avc_config(data: &[u8]) -> Option<AvcConfig> {
         }
 
         let nal_type = nal[0] & 0x1f;
+
+        // INV-301: NAL type must be valid
+        assert_invariant!(
+            nal_type <= 31,
+            "INV-301: H.264 NAL type must be valid (0-31)",
+            "codec::h264::extract_avc_config"
+        );
 
         if nal_type == nal_type::SPS && sps.is_none() {
             sps = Some(nal);
@@ -135,10 +147,21 @@ pub fn extract_avc_config(data: &[u8]) -> Option<AvcConfig> {
         }
     }
 
-    Some(AvcConfig {
-        sps: sps?.to_vec(),
-        pps: pps?.to_vec(),
-    })
+    // INV-302: Both SPS and PPS must be found for valid config
+    if let (Some(sps_data), Some(pps_data)) = (sps, pps) {
+        assert_invariant!(
+            !sps_data.is_empty() && !pps_data.is_empty(),
+            "INV-302: H.264 SPS and PPS must be non-empty",
+            "codec::h264::extract_avc_config"
+        );
+
+        Some(AvcConfig {
+            sps: sps_data.to_vec(),
+            pps: pps_data.to_vec(),
+        })
+    } else {
+        None
+    }
 }
 
 /// Create a default AVC configuration for testing/fallback.

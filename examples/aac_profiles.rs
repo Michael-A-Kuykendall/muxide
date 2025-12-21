@@ -36,7 +36,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    println!("Testing AAC {} profile muxing...", profile_str.to_uppercase());
+    println!(
+        "Testing AAC {} profile muxing...",
+        profile_str.to_uppercase()
+    );
 
     // Create test video frames (minimal H.264)
     let video_frame = vec![
@@ -65,7 +68,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     muxer.write_video(0.0, &video_frame, true)?;
 
     // Write several AAC frames (simulating ~1 second of audio at 48kHz)
-    for i in 0..46 { // ~46 frames per second for AAC
+    for i in 0..46 {
+        // ~46 frames per second for AAC
         let pts = i as f64 * (1024.0 / 48000.0); // AAC frame duration
         let aac_frame = generate_aac_frame(profile, i);
         muxer.write_audio(pts, &aac_frame)?;
@@ -73,16 +77,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let stats = muxer.finish_with_stats()?;
 
-    println!("✅ Successfully created AAC {} MP4 file!", profile_str.to_uppercase());
-    println!("📊 Stats: {} video frames, {} audio frames, {:.3}s duration, {} bytes",
-             stats.video_frames, stats.audio_frames, stats.duration_secs, stats.bytes_written);
+    println!(
+        "✅ Successfully created AAC {} MP4 file!",
+        profile_str.to_uppercase()
+    );
+    println!(
+        "📊 Stats: {} video frames, {} audio frames, {:.3}s duration, {} bytes",
+        stats.video_frames, stats.audio_frames, stats.duration_secs, stats.bytes_written
+    );
     println!("🎵 Output: {}", out_path.display());
 
     // Verification instructions
     println!("\n🔍 To verify the AAC audio:");
-    println!("1. Play with: ffplay {}  (or any MP4 player)", out_path.display());
-    println!("2. Check streams: ffprobe -i {} -show_streams", out_path.display());
-    println!("3. Extract audio: ffmpeg -i {} -vn -acodec copy audio.aac", out_path.display());
+    println!(
+        "1. Play with: ffplay {}  (or any MP4 player)",
+        out_path.display()
+    );
+    println!(
+        "2. Check streams: ffprobe -i {} -show_streams",
+        out_path.display()
+    );
+    println!(
+        "3. Extract audio: ffmpeg -i {} -vn -acodec copy audio.aac",
+        out_path.display()
+    );
 
     Ok(())
 }

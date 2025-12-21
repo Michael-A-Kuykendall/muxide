@@ -1,4 +1,4 @@
-use muxide::api::{MuxerBuilder, VideoCodec, AudioCodec, AacProfile, MuxerError};
+use muxide::api::{AacProfile, AudioCodec, MuxerBuilder, MuxerError, VideoCodec};
 use std::io::Cursor;
 
 fn read_hex_bytes(contents: &str) -> Vec<u8> {
@@ -16,7 +16,9 @@ fn read_hex_bytes(contents: &str) -> Vec<u8> {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("🚀 Demonstrating WORLD-CLASS ADTS Error Messages in Muxide");
     println!("===========================================================");
-    println!("✨ New Features: Severity indicators, enhanced hex dumps, JSON output, error chaining");
+    println!(
+        "✨ New Features: Severity indicators, enhanced hex dumps, JSON output, error chaining"
+    );
     println!();
 
     let sink = Cursor::new(Vec::<u8>::new());
@@ -59,7 +61,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!();
             println!("📄 JSON Output (for tools/programmatic handling):");
             // Check if this is a detailed ADTS error
-            if let MuxerError::InvalidAdtsDetailed { error: ref adts_err, .. } = e {
+            if let MuxerError::InvalidAdtsDetailed {
+                error: ref adts_err,
+                ..
+            } = e
+            {
                 if let Ok(json) = adts_err.to_json() {
                     println!("{}", json);
                 }

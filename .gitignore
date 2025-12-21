@@ -20,3 +20,4 @@ Thumbs.db
 *.h264
 *.aac
 *.adts
+.env

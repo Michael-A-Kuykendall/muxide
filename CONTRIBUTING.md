@@ -53,7 +53,7 @@ Bug reports via GitHub Issues are welcome! Please include:
 If a contribution is discussed and approved:
 - Rust 2021 edition with `cargo fmt` and `cargo clippy`
 - Zero runtime dependencies (only std)
-- MSRV 1.70 compatibility
+- MSRV 1.74 compatibility
 - Property-based tests for new functionality
 - All public APIs must have documentation
 
@@ -80,6 +80,20 @@ The code is open. The governance is centralized. This is intentional.
 
 Helpful bug reports and community members are acknowledged in release notes.
 If email collaboration leads to merged work, attribution will be given appropriately.
+
+## Release Process
+
+Releases are handled by the maintainer using automated tooling:
+
+1. **Version bump**: Update `Cargo.toml` version
+2. **Changelog**: Update `CHANGELOG.md` with release notes
+3. **Tag creation**: `git tag vX.Y.Z && git push --tags`
+4. **Automated publishing**:
+   - GitHub Actions builds cross-platform binaries
+   - Binaries are attached to the GitHub release
+   - Crate is published to crates.io
+
+Pre-built binaries are available for Linux (x86_64) in GitHub releases.
 
 ---
 

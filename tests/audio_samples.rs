@@ -177,7 +177,11 @@ fn aac_profiles_supported() -> Result<(), Box<dyn std::error::Error>> {
         let output = buffer.lock().unwrap();
 
         // Verify basic MP4 structure
-        assert!(output.len() > 1000, "Output too small for profile {:?}", profile);
+        assert!(
+            output.len() > 1000,
+            "Output too small for profile {:?}",
+            profile
+        );
 
         // Verify moov and mdat boxes exist
         let boxes = parse_boxes(&output);

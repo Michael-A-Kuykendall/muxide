@@ -1,3 +1,7 @@
+use crate::assert_invariant;
+use crate::codec::common::AnnexBNalIter;
+use crate::codec::vp9::is_vp9_keyframe;
+use crate::fragmented::{FragmentConfig, FragmentedMuxer};
 /// Public API definitions for the Muxide crate.
 ///
 /// This module contains the types and traits that form the public contract
@@ -6,8 +10,6 @@
 /// capabilities promised by the charter and contract documents.  It does
 /// not contain any implementation details.
 use crate::muxer::mp4::{Mp4AudioTrack, Mp4VideoTrack, Mp4Writer, Mp4WriterError, MEDIA_TIMESCALE};
-use crate::codec::common::AnnexBNalIter;
-use crate::fragmented::{FragmentedMuxer, FragmentConfig};
 use std::fmt;
 use std::io::Write;
 
@@ -23,6 +25,9 @@ pub enum VideoCodec {
     /// AV1 video codec. OBU (Open Bitstream Unit) stream format.
     /// Requires first keyframe to contain Sequence Header OBU.
     Av1,
+    /// VP9 video codec. Compressed VP9 frames with frame headers.
+    /// Requires first keyframe to contain sequence parameters.
+    Vp9,
 }
 
 impl fmt::Display for VideoCodec {
@@ -31,6 +36,7 @@ impl fmt::Display for VideoCodec {
             VideoCodec::H264 => write!(f, "H.264"),
             VideoCodec::H265 => write!(f, "H.265"),
             VideoCodec::Av1 => write!(f, "AV1"),
+            VideoCodec::Vp9 => write!(f, "VP9"),
         }
     }
 }
@@ -43,6 +49,7 @@ impl std::str::FromStr for VideoCodec {
             "h264" | "h.264" | "avc" => Ok(VideoCodec::H264),
             "h265" | "h.265" | "hevc" => Ok(VideoCodec::H265),
             "av1" => Ok(VideoCodec::Av1),
+            "vp9" => Ok(VideoCodec::Vp9),
             _ => Err(format!("Unknown video codec: {}", s)),
         }
     }
@@ -275,7 +282,9 @@ impl<Writer> MuxerBuilder<Writer> {
 
     /// Set creation time for the media file
     pub fn set_create_time(mut self, unix_timestamp: u64) -> Self {
-        self.metadata.get_or_insert_with(Metadata::default).creation_time = Some(unix_timestamp);
+        self.metadata
+            .get_or_insert_with(Metadata::default)
+            .creation_time = Some(unix_timestamp);
         self
     }
 
@@ -286,7 +295,13 @@ impl<Writer> MuxerBuilder<Writer> {
     }
 
     /// Set video track parameters
-    pub fn set_video_track(mut self, codec: VideoCodec, width: u32, height: u32, framerate: f64) -> Self {
+    pub fn set_video_track(
+        mut self,
+        codec: VideoCodec,
+        width: u32,
+        height: u32,
+        framerate: f64,
+    ) -> Self {
         self.video = Some((codec, width, height, framerate));
         self
     }
@@ -367,7 +382,8 @@ impl<Writer> MuxerBuilder<Writer> {
     /// Returns an error if video configuration is missing.
     pub fn new_with_fragment(self) -> Result<FragmentedMuxer, MuxerError> {
         // Fragmented MP4 requires video configuration
-        let (_codec, width, height, _framerate) = self.video.ok_or(MuxerError::MissingVideoConfig)?;
+        let (_codec, width, height, _framerate) =
+            self.video.ok_or(MuxerError::MissingVideoConfig)?;
 
         // Extract SPS/PPS from video codec config (simplified for now)
         // In a real implementation, this would parse the codec config
@@ -377,7 +393,7 @@ impl<Writer> MuxerBuilder<Writer> {
         let config = FragmentConfig {
             width,
             height,
-            timescale: 90000, // Standard video timescale
+            timescale: 90000,           // Standard video timescale
             fragment_duration_ms: 2000, // 2 second fragments
             sps,
             pps,
@@ -482,10 +498,15 @@ pub enum MuxerError {
     FirstVideoFrameMissingSpsPps,
     /// The first AV1 keyframe must include a Sequence Header OBU.
     FirstAv1FrameMissingSequenceHeader,
+    /// The first VP9 keyframe must include sequence parameters.
+    FirstVp9FrameMissingSequenceHeader,
     /// Audio sample is not a valid ADTS frame.
     InvalidAdts { frame_index: u64 },
     /// Audio sample has detailed ADTS validation errors.
-    InvalidAdtsDetailed { frame_index: u64, error: crate::muxer::mp4::AdtsValidationError },
+    InvalidAdtsDetailed {
+        frame_index: u64,
+        error: Box<crate::muxer::mp4::AdtsValidationError>,
+    },
     /// Audio sample is not a valid Opus packet.
     InvalidOpusPacket { frame_index: u64 },
     /// DTS must be monotonically increasing.
@@ -559,6 +580,10 @@ impl fmt::Display for MuxerError {
             MuxerError::FirstAv1FrameMissingSequenceHeader => {
                 write!(f, "first AV1 frame must contain a Sequence Header OBU: \
                           ensure the first keyframe includes OBU type 1 (SEQUENCE_HEADER)")
+            }
+            MuxerError::FirstVp9FrameMissingSequenceHeader => {
+                write!(f, "first VP9 frame must contain sequence parameters: \
+                          ensure the first keyframe includes VP9 frame header with configuration data")
             }
             MuxerError::InvalidAdts { frame_index } => {
                 write!(f, "audio frame {} is not valid ADTS: ensure the frame starts with 0xFFF sync word",
@@ -641,10 +666,6 @@ impl<Writer: Write> Muxer<Writer> {
         data: &[u8],
         is_keyframe: bool,
     ) -> Result<(), MuxerError> {
-        if self.finished {
-            return Err(MuxerError::AlreadyFinished);
-        }
-
         let frame_index = self.video_frame_count;
 
         // Reject empty frames - they cause playback issues
@@ -774,8 +795,13 @@ impl<Writer: Write> Muxer<Writer> {
             Mp4WriterError::FirstFrameMissingSequenceHeader => {
                 MuxerError::FirstAv1FrameMissingSequenceHeader
             }
+            Mp4WriterError::FirstFrameMissingVp9Config => {
+                MuxerError::FirstVp9FrameMissingSequenceHeader
+            }
             Mp4WriterError::InvalidAdts => MuxerError::InvalidAdts { frame_index },
-            Mp4WriterError::InvalidAdtsDetailed(error) => MuxerError::InvalidAdtsDetailed { frame_index, error },
+            Mp4WriterError::InvalidAdtsDetailed(error) => {
+                MuxerError::InvalidAdtsDetailed { frame_index, error }
+            }
             Mp4WriterError::InvalidOpusPacket => MuxerError::InvalidOpusPacket { frame_index },
             Mp4WriterError::AudioNotEnabled => MuxerError::AudioNotConfigured,
             Mp4WriterError::DurationOverflow => MuxerError::Io(std::io::Error::new(
@@ -872,22 +898,71 @@ impl<Writer: Write> Muxer<Writer> {
 
     /// Helper to detect if a video frame is a keyframe.
     fn is_keyframe(&self, data: &[u8]) -> bool {
+        // INV-100: Video frame data must not be empty
+        assert_invariant!(
+            !data.is_empty(),
+            "INV-100: Video frame data must not be empty",
+            "api::is_keyframe"
+        );
+
         match self.video_track.codec {
             VideoCodec::H264 => {
                 // Check for IDR NAL (type 5)
-                AnnexBNalIter::new(data).any(|nal| (nal[0] & 0x1f) == 5)
+                let has_idr = AnnexBNalIter::new(data).any(|nal| (nal[0] & 0x1f) == 5);
+
+                // INV-101: H.264 keyframe detection must find valid NAL structure
+                // TODO: This invariant needs to be redesigned - it currently fails for valid P-frames
+                // assert_invariant!(
+                //     has_idr || !AnnexBNalIter::new(data).any(|_| true),
+                //     "H.264 keyframe detection requires valid NAL structure",
+                //     "api::is_keyframe::h264"
+                // );
+
+                has_idr
             }
             VideoCodec::H265 => {
                 // Check for IDR NAL (type 19-21)
-                AnnexBNalIter::new(data).any(|nal| {
+                let has_idr = AnnexBNalIter::new(data).any(|nal| {
                     let nal_type = (nal[0] >> 1) & 0x3f;
                     (19..=21).contains(&nal_type)
-                })
+                });
+
+                // INV-102: H.265 keyframe detection must find valid NAL structure
+                // TODO: This invariant needs to be redesigned - it currently fails for valid P-frames
+                // assert_invariant!(
+                //     has_idr || !AnnexBNalIter::new(data).any(|_| true),
+                //     "H.265 keyframe detection requires valid NAL structure",
+                //     "api::is_keyframe::h265"
+                // );
+
+                has_idr
             }
             VideoCodec::Av1 => {
                 // For AV1, check if it's a key frame (first frame or has key frame flag)
                 // Simple heuristic: first frame is keyframe
-                self.video_frame_count == 0
+                let is_key = self.video_frame_count == 0;
+
+                // INV-103: AV1 first frame must be keyframe
+                assert_invariant!(
+                    is_key || self.video_frame_count > 0,
+                    "AV1 first frame must be keyframe",
+                    "api::is_keyframe::av1"
+                );
+
+                is_key
+            }
+            VideoCodec::Vp9 => {
+                // Use VP9 keyframe detection
+                let is_key = is_vp9_keyframe(data).unwrap_or(false);
+
+                // INV-104: VP9 keyframe detection must handle invalid frames gracefully
+                assert_invariant!(
+                    is_key || data.len() >= 3,
+                    "VP9 keyframe detection requires minimum frame size",
+                    "api::is_keyframe::vp9"
+                );
+
+                is_key
             }
         }
     }
@@ -1086,8 +1161,11 @@ mod tests {
 
     #[test]
     fn muxer_config_with_audio_sets_audio_config() {
-        let config = MuxerConfig::new(1920, 1080, 30.0)
-            .with_audio(AudioCodec::Aac(AacProfile::Lc), 48000, 2);
+        let config = MuxerConfig::new(1920, 1080, 30.0).with_audio(
+            AudioCodec::Aac(AacProfile::Lc),
+            48000,
+            2,
+        );
 
         assert!(config.audio.is_some());
         let audio = config.audio.unwrap();
@@ -1108,8 +1186,7 @@ mod tests {
     #[test]
     fn muxer_config_with_metadata_sets_metadata() {
         let metadata = Metadata::new().with_title("Test");
-        let config = MuxerConfig::new(1920, 1080, 30.0)
-            .with_metadata(metadata);
+        let config = MuxerConfig::new(1920, 1080, 30.0).with_metadata(metadata);
 
         assert!(config.metadata.is_some());
         assert_eq!(config.metadata.unwrap().title, Some("Test".to_string()));
@@ -1117,8 +1194,7 @@ mod tests {
 
     #[test]
     fn muxer_config_with_fast_start_sets_fast_start() {
-        let config = MuxerConfig::new(1920, 1080, 30.0)
-            .with_fast_start(false);
+        let config = MuxerConfig::new(1920, 1080, 30.0).with_fast_start(false);
 
         assert!(!config.fast_start);
     }

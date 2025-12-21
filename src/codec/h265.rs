@@ -139,6 +139,8 @@ pub fn is_hevc_keyframe_nal_type(nal_type: u8) -> bool {
     )
 }
 
+use crate::assert_invariant;
+
 /// Extract HEVC configuration (VPS/SPS/PPS) from Annex B keyframe data.
 ///
 /// Scans the NAL units in the provided data and extracts the first
@@ -170,6 +172,10 @@ pub fn is_hevc_keyframe_nal_type(nal_type: u8) -> bool {
 /// assert_eq!(config.vps[0] >> 1 & 0x3f, 32);  // VPS NAL type
 /// ```
 pub fn extract_hevc_config(data: &[u8]) -> Option<HevcConfig> {
+    if data.is_empty() {
+        return None;
+    }
+
     let mut vps: Option<&[u8]> = None;
     let mut sps: Option<&[u8]> = None;
     let mut pps: Option<&[u8]> = None;
@@ -180,6 +186,11 @@ pub fn extract_hevc_config(data: &[u8]) -> Option<HevcConfig> {
         }
 
         let nal_type = hevc_nal_type(nal);
+
+        assert_invariant!(
+            nal_type <= 63,
+            "INV-501: HEVC NAL type must be valid (0-63)"
+        );
 
         match nal_type {
             nal_type::VPS if vps.is_none() => vps = Some(nal),
@@ -194,11 +205,21 @@ pub fn extract_hevc_config(data: &[u8]) -> Option<HevcConfig> {
         }
     }
 
-    Some(HevcConfig {
-        vps: vps?.to_vec(),
-        sps: sps?.to_vec(),
-        pps: pps?.to_vec(),
-    })
+    // Verify we found all required parameter sets
+    if let (Some(vps_data), Some(sps_data), Some(pps_data)) = (vps, sps, pps) {
+        assert_invariant!(
+            !vps_data.is_empty() && !sps_data.is_empty() && !pps_data.is_empty(),
+            "INV-502: HEVC VPS, SPS, and PPS must be non-empty"
+        );
+
+        Some(HevcConfig {
+            vps: vps_data.to_vec(),
+            sps: sps_data.to_vec(),
+            pps: pps_data.to_vec(),
+        })
+    } else {
+        None
+    }
 }
 
 /// Convert Annex B formatted HEVC data to hvcC format (length-prefixed).
@@ -228,15 +249,32 @@ pub fn hevc_annexb_to_hvcc(data: &[u8]) -> Vec<u8> {
 
 /// Check if the given Annex B data represents an HEVC keyframe (IRAP).
 pub fn is_hevc_keyframe(data: &[u8]) -> bool {
+    assert_invariant!(
+        !data.is_empty(),
+        "INV-503: HEVC keyframe detection requires non-empty data"
+    );
+
     for nal in AnnexBNalIter::new(data) {
         if nal.is_empty() {
             continue;
         }
         let nal_type = hevc_nal_type(nal);
+
+        assert_invariant!(
+            nal_type <= 63,
+            "INV-504: HEVC NAL type must be valid (0-63)"
+        );
+
         if is_hevc_keyframe_nal_type(nal_type) {
             return true;
         }
     }
+
+    assert_invariant!(
+        AnnexBNalIter::new(data).count() > 0,
+        "INV-505: HEVC keyframe detection must find at least one NAL unit"
+    );
+
     false
 }
 

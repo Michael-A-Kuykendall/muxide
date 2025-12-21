@@ -8,8 +8,9 @@
 //!
 //! - **H.264/AVC**: Extract SPS/PPS from Annex B NAL units
 //! - **H.265/HEVC**: Extract VPS/SPS/PPS from Annex B NAL units
+//! - **VP9**: Extract frame headers and configuration from compressed frames
 //! - **Opus**: Parse TOC for frame duration, build dOps config
-//! - **AV1**: (stub - coming soon)
+//! - **AV1**: Parse OBU headers for sequence configuration
 //!
 //! # Input Format
 //!
@@ -24,6 +25,7 @@ pub mod common;
 pub mod h264;
 pub mod h265;
 pub mod opus;
+pub mod vp9;
 
 pub use common::{find_start_code, AnnexBNalIter};
 pub use h264::{annexb_to_avcc, extract_avc_config, is_h264_keyframe, AvcConfig};

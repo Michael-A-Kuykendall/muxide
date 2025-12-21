@@ -24,6 +24,8 @@ Its mission is **simple muxing done right**: encoded frames in, playable MP4 out
 - ✅ **API Compatibility**: Builder pattern with fluent API methods
 - ✅ **Production Validation**: FFmpeg/ffprobe compatibility verified
 - ✅ **Extensive Testing**: 80+ unit tests, property-based tests, 88% coverage
+- ✅ **PPT Framework**: Runtime invariant enforcement with 13 contract tests
+- ✅ **CI/CD Integration**: Fast unit tests on every commit, comprehensive property tests on PRs
 - ✅ **Real-World Examples**: Working demos with fixture data
 - ✅ **CLI Tool**: Command-line interface for immediate developer utility
 

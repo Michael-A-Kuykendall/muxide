@@ -7,6 +7,7 @@ use crate::codec::av1::{extract_av1_config, Av1Config};
 use crate::codec::h264::{annexb_to_avcc, default_avc_config, extract_avc_config, AvcConfig};
 use crate::codec::h265::{extract_hevc_config, hevc_annexb_to_hvcc, HevcConfig};
 use crate::codec::opus::{is_valid_opus_packet, OpusConfig, OPUS_SAMPLE_RATE};
+use crate::codec::vp9::{extract_vp9_config, Vp9Config};
 
 const MOVIE_TIMESCALE: u32 = 1000;
 /// Track/media timebase used for converting `pts` seconds into MP4 sample deltas.
@@ -23,6 +24,8 @@ pub enum VideoConfig {
     Hevc(HevcConfig),
     /// AV1 configuration (Sequence Header OBU)
     Av1(Av1Config),
+    /// VP9 configuration (frame header parameters)
+    Vp9(Vp9Config),
 }
 
 /// Minimal MP4 writer used by the early slices.
@@ -206,30 +209,53 @@ impl fmt::Display for AdtsValidationError {
         // Main error message
         match &self.kind {
             AdtsErrorKind::FrameTooShort => {
-                write!(f, "ADTS frame too short: need at least 7 bytes for header, got {}", self.byte_offset)?;
+                write!(
+                    f,
+                    "ADTS frame too short: need at least 7 bytes for header, got {}",
+                    self.byte_offset
+                )?;
             }
             AdtsErrorKind::MissingSyncword => {
-                write!(f, "ADTS syncword missing at byte {}: expected 0xFFF in first 12 bits", self.byte_offset)?;
+                write!(
+                    f,
+                    "ADTS syncword missing at byte {}: expected 0xFFF in first 12 bits",
+                    self.byte_offset
+                )?;
                 if let (Some(_expected), Some(found)) = (&self.expected, &self.found) {
                     write!(f, " (expected {}, found {})", _expected, found)?;
                 }
             }
             AdtsErrorKind::InvalidFrameLength => {
-                write!(f, "ADTS frame length invalid at byte {}: ", self.byte_offset)?;
+                write!(
+                    f,
+                    "ADTS frame length invalid at byte {}: ",
+                    self.byte_offset
+                )?;
                 if let (Some(_expected), Some(found)) = (&self.expected, &self.found) {
                     write!(f, "expected {}, found {}", _expected, found)?;
                 }
-                write!(f, " (frame length must be >= header length and <= total frame size)")?;
+                write!(
+                    f,
+                    " (frame length must be >= header length and <= total frame size)"
+                )?;
             }
             AdtsErrorKind::InvalidHeaderLength => {
-                write!(f, "ADTS header length mismatch at byte {}: ", self.byte_offset)?;
+                write!(
+                    f,
+                    "ADTS header length mismatch at byte {}: ",
+                    self.byte_offset
+                )?;
                 if let (Some(expected), Some(found)) = (&self.expected, &self.found) {
                     write!(f, "expected header length {}, found {}", expected, found)?;
                 }
                 write!(f, " (check protection_absent flag)")?;
             }
             AdtsErrorKind::InvalidMpegVersion => {
-                write!(f, "ADTS MPEG version invalid at byte {}: ", self.byte_offset)?;
+                write!(
+                    f,
+                    "ADTS MPEG version invalid at byte {}: ",
+                    self.byte_offset
+                )?;
                 if let (Some(_expected), Some(found)) = (&self.expected, &self.found) {
                     write!(f, "expected {}, found {}", _expected, found)?;
                 }
@@ -243,14 +269,22 @@ impl fmt::Display for AdtsValidationError {
                 write!(f, " (must be 0 for AAC)")?;
             }
             AdtsErrorKind::InvalidSampleRateIndex => {
-                write!(f, "ADTS sample rate index invalid at byte {}: ", self.byte_offset)?;
+                write!(
+                    f,
+                    "ADTS sample rate index invalid at byte {}: ",
+                    self.byte_offset
+                )?;
                 if let (Some(_expected), Some(found)) = (&self.expected, &self.found) {
                     write!(f, "expected 0-12, found {}", found)?;
                 }
                 write!(f, " (valid range is 0-12 corresponding to 96000-7350 Hz)")?;
             }
             AdtsErrorKind::InvalidChannelConfig => {
-                write!(f, "ADTS channel configuration invalid at byte {}: ", self.byte_offset)?;
+                write!(
+                    f,
+                    "ADTS channel configuration invalid at byte {}: ",
+                    self.byte_offset
+                )?;
                 if let (Some(_expected), Some(found)) = (&self.expected, &self.found) {
                     write!(f, "expected 1-7, found {}", found)?;
                 }
@@ -333,10 +367,13 @@ pub enum Mp4WriterError {
     FirstFrameMissingSpsPps,
     /// The first AV1 keyframe must include a Sequence Header OBU.
     FirstFrameMissingSequenceHeader,
+    /// The first VP9 keyframe must include valid frame header parameters.
+    FirstFrameMissingVp9Config,
     /// Audio sample is not a valid ADTS frame.
+    #[allow(dead_code)]
     InvalidAdts,
     /// Audio sample has detailed ADTS validation errors.
-    InvalidAdtsDetailed(AdtsValidationError),
+    InvalidAdtsDetailed(Box<AdtsValidationError>),
     /// Audio sample is not a valid Opus packet.
     InvalidOpusPacket,
     /// Audio track is not enabled on this writer.
@@ -359,6 +396,9 @@ impl fmt::Display for Mp4WriterError {
             }
             Mp4WriterError::FirstFrameMissingSequenceHeader => {
                 write!(f, "first AV1 frame must contain Sequence Header OBU")
+            }
+            Mp4WriterError::FirstFrameMissingVp9Config => {
+                write!(f, "first VP9 frame must contain valid frame header")
             }
             Mp4WriterError::InvalidAdts => write!(f, "invalid ADTS frame"),
             Mp4WriterError::InvalidAdtsDetailed(err) => write!(f, "{}", err),
@@ -476,10 +516,12 @@ impl<Writer: Write> Mp4Writer<Writer> {
                 VideoCodec::H264 => extract_avc_config(data).map(VideoConfig::Avc),
                 VideoCodec::H265 => extract_hevc_config(data).map(VideoConfig::Hevc),
                 VideoCodec::Av1 => extract_av1_config(data).map(VideoConfig::Av1),
+                VideoCodec::Vp9 => extract_vp9_config(data).map(VideoConfig::Vp9),
             };
             if config.is_none() {
                 return Err(match self.video_codec {
                     VideoCodec::Av1 => Mp4WriterError::FirstFrameMissingSequenceHeader,
+                    VideoCodec::Vp9 => Mp4WriterError::FirstFrameMissingVp9Config,
                     _ => Mp4WriterError::FirstFrameMissingSpsPps,
                 });
             }
@@ -492,6 +534,7 @@ impl<Writer: Write> Mp4Writer<Writer> {
             VideoCodec::H264 => annexb_to_avcc(data),
             VideoCodec::H265 => hevc_annexb_to_hvcc(data),
             VideoCodec::Av1 => data.to_vec(), // AV1 OBUs passed as-is
+            VideoCodec::Vp9 => data.to_vec(), // VP9 compressed frames passed as-is
         };
         if converted.len() > u32::MAX as usize {
             return Err(Mp4WriterError::DurationOverflow);
@@ -537,12 +580,21 @@ impl<Writer: Write> Mp4Writer<Writer> {
             AudioCodec::Aac(profile) => {
                 // INV-020: AAC profile must be supported
                 assert_invariant!(
-                    matches!(profile, AacProfile::Lc | AacProfile::Main | AacProfile::Ssr | AacProfile::Ltp | AacProfile::He | AacProfile::Hev2),
-                    "AAC profile must be one of the supported variants",
-                    "codec::aac"
+                    matches!(
+                        profile,
+                        AacProfile::Lc
+                            | AacProfile::Main
+                            | AacProfile::Ssr
+                            | AacProfile::Ltp
+                            | AacProfile::He
+                            | AacProfile::Hev2
+                    ),
+                    "INV-020: AAC profile must be one of the supported variants",
+                    "aac audio processing"
                 );
 
-                let raw = adts_to_raw(data).map_err(Mp4WriterError::InvalidAdtsDetailed)?;
+                let raw = adts_to_raw(data)
+                    .map_err(|e| Mp4WriterError::InvalidAdtsDetailed(Box::new(e)))?;
                 raw.to_vec()
             }
             AudioCodec::Opus => {
@@ -598,6 +650,7 @@ impl<Writer: Write> Mp4Writer<Writer> {
                         VideoCodec::H264 => Some(VideoConfig::Avc(default_avc_config())),
                         VideoCodec::H265 => None, // No default for HEVC, must have frames
                         VideoCodec::Av1 => None,  // No default for AV1, must have frames
+                        VideoCodec::Vp9 => None,  // No default for VP9, must have frames
                     }
                 } else {
                     None
@@ -965,6 +1018,7 @@ enum TrackKind {
     Audio,
 }
 
+#[allow(clippy::result_large_err)]
 fn adts_to_raw(frame: &[u8]) -> Result<&[u8], AdtsValidationError> {
     // Enhanced hex dump with ASCII and color highlighting
     let create_hex_dump = |offset: usize, len: usize| -> String {
@@ -988,7 +1042,11 @@ fn adts_to_raw(frame: &[u8]) -> Result<&[u8], AdtsValidationError> {
             }
 
             // ASCII representation
-            let ascii_char = if byte.is_ascii_graphic() { byte as char } else { '.' };
+            let ascii_char = if byte.is_ascii_graphic() {
+                byte as char
+            } else {
+                '.'
+            };
             if global_offset == offset {
                 ascii.push_str(&format!("\x1b[91m{}\x1b[0m", ascii_char));
             } else if global_offset >= offset && global_offset < offset + len {
@@ -1057,9 +1115,17 @@ fn adts_to_raw(frame: &[u8]) -> Result<&[u8], AdtsValidationError> {
             expected: Some("0 (MPEG-4)".to_string()),
             found: Some(format!("{} (MPEG-2)", mpeg_version)),
             hex_dump: Some(create_hex_dump(1, 1)),
-            suggestion: Some("Muxide only supports MPEG-4 AAC. Convert your audio to MPEG-4 AAC format.".to_string()),
-            code_example: Some("Use ffmpeg: ffmpeg -i input.mp3 -c:a aac -profile:a aac_low output.m4a".to_string()),
-            technical_details: Some("MPEG version bit: 0=MPEG-4, 1=MPEG-2. Muxide requires MPEG-4 AAC.".to_string()),
+            suggestion: Some(
+                "Muxide only supports MPEG-4 AAC. Convert your audio to MPEG-4 AAC format."
+                    .to_string(),
+            ),
+            code_example: Some(
+                "Use ffmpeg: ffmpeg -i input.mp3 -c:a aac -profile:a aac_low output.m4a"
+                    .to_string(),
+            ),
+            technical_details: Some(
+                "MPEG version bit: 0=MPEG-4, 1=MPEG-2. Muxide requires MPEG-4 AAC.".to_string(),
+            ),
             related_errors: Vec::new(),
         });
     }
@@ -1074,9 +1140,17 @@ fn adts_to_raw(frame: &[u8]) -> Result<&[u8], AdtsValidationError> {
             expected: Some("0 (AAC)".to_string()),
             found: Some(format!("{} (Layer {})", layer, layer)),
             hex_dump: Some(create_hex_dump(1, 1)),
-            suggestion: Some("This appears to be MP3 or other MPEG audio format. Convert to AAC format.".to_string()),
-            code_example: Some("Convert MP3 to AAC: ffmpeg -i input.mp3 -c:a aac -b:a 128k output.m4a".to_string()),
-            technical_details: Some("Layer field: 00=AAC, 01=Layer3, 10=Layer2, 11=Layer1. AAC requires 00.".to_string()),
+            suggestion: Some(
+                "This appears to be MP3 or other MPEG audio format. Convert to AAC format."
+                    .to_string(),
+            ),
+            code_example: Some(
+                "Convert MP3 to AAC: ffmpeg -i input.mp3 -c:a aac -b:a 128k output.m4a".to_string(),
+            ),
+            technical_details: Some(
+                "Layer field: 00=AAC, 01=Layer3, 10=Layer2, 11=Layer1. AAC requires 00."
+                    .to_string(),
+            ),
             related_errors: Vec::new(),
         });
     }
@@ -1189,11 +1263,21 @@ fn adts_to_raw(frame: &[u8]) -> Result<&[u8], AdtsValidationError> {
                 severity: ErrorSeverity::Error,
                 byte_offset: crc_start,
                 expected: Some("2 CRC bytes".to_string()),
-                found: Some(format!("{} bytes available", frame.len().saturating_sub(crc_start))),
-                hex_dump: Some(create_hex_dump(crc_start, frame.len().saturating_sub(crc_start))),
-                suggestion: Some("CRC protection is enabled but CRC bytes are missing or truncated.".to_string()),
+                found: Some(format!(
+                    "{} bytes available",
+                    frame.len().saturating_sub(crc_start)
+                )),
+                hex_dump: Some(create_hex_dump(
+                    crc_start,
+                    frame.len().saturating_sub(crc_start),
+                )),
+                suggestion: Some(
+                    "CRC protection is enabled but CRC bytes are missing or truncated.".to_string(),
+                ),
                 code_example: None,
-                technical_details: Some("CRC is 16 bits stored after header when protection_absent=0.".to_string()),
+                technical_details: Some(
+                    "CRC is 16 bits stored after header when protection_absent=0.".to_string(),
+                ),
                 related_errors: Vec::new(),
             });
         }
@@ -1237,7 +1321,11 @@ fn build_moov_box(
     build_box(b"moov", &payload)
 }
 
-fn build_audio_trak_box(audio: &Mp4AudioTrack, tables: &SampleTables, metadata: Option<&Metadata>) -> Vec<u8> {
+fn build_audio_trak_box(
+    audio: &Mp4AudioTrack,
+    tables: &SampleTables,
+    metadata: Option<&Metadata>,
+) -> Vec<u8> {
     let tkhd_box = build_audio_tkhd_box();
     let mdia_box = build_audio_mdia_box(audio, tables, metadata);
 
@@ -1251,7 +1339,11 @@ fn build_audio_tkhd_box() -> Vec<u8> {
     build_tkhd_box_with_id(2, 0x0100, 0, 0)
 }
 
-fn build_audio_mdia_box(audio: &Mp4AudioTrack, tables: &SampleTables, metadata: Option<&Metadata>) -> Vec<u8> {
+fn build_audio_mdia_box(
+    audio: &Mp4AudioTrack,
+    tables: &SampleTables,
+    metadata: Option<&Metadata>,
+) -> Vec<u8> {
     let duration = tables.total_duration();
     let language = metadata.and_then(|m| m.language.as_deref());
     let mdhd_box = build_mdhd_box_with_timescale_and_duration(MEDIA_TIMESCALE, duration, language);
@@ -1548,6 +1640,7 @@ fn build_stsd_box(video: &Mp4VideoTrack, video_config: &VideoConfig) -> Vec<u8> 
         VideoConfig::Avc(avc_config) => build_avc1_box(video, avc_config),
         VideoConfig::Hevc(hevc_config) => build_hvc1_box(video, hevc_config),
         VideoConfig::Av1(av1_config) => build_av01_box(video, av1_config),
+        VideoConfig::Vp9(vp9_config) => build_vp09_box(video, vp9_config),
     };
 
     let mut payload = Vec::new();
@@ -1933,6 +2026,70 @@ fn build_av1c_box(av1_config: &Av1Config) -> Vec<u8> {
     build_box(b"av1C", &payload)
 }
 
+fn build_vp09_box(video: &Mp4VideoTrack, vp9_config: &Vp9Config) -> Vec<u8> {
+    // INV-002: Width/height must fit in 16-bit for visual sample entry
+    assert_invariant!(
+        video.width <= u16::MAX as u32,
+        "Width must fit in 16-bit",
+        "build_vp09_box"
+    );
+    assert_invariant!(
+        video.height <= u16::MAX as u32,
+        "Height must fit in 16-bit",
+        "build_vp09_box"
+    );
+
+    let mut payload = Vec::new();
+    // Reserved (6 bytes)
+    payload.extend_from_slice(&[0u8; 6]);
+    // Data reference index
+    payload.extend_from_slice(&1u16.to_be_bytes());
+    // Pre-defined + reserved
+    payload.extend_from_slice(&0u16.to_be_bytes());
+    payload.extend_from_slice(&0u16.to_be_bytes());
+    payload.extend_from_slice(&0u32.to_be_bytes());
+    payload.extend_from_slice(&0u32.to_be_bytes());
+    payload.extend_from_slice(&0u32.to_be_bytes());
+    // Width and height are 16-bit values in the visual sample entry
+    payload.extend_from_slice(&(video.width as u16).to_be_bytes());
+    payload.extend_from_slice(&(video.height as u16).to_be_bytes());
+    // Horizontal/vertical resolution (72 dpi fixed point)
+    payload.extend_from_slice(&0x0048_0000_u32.to_be_bytes());
+    payload.extend_from_slice(&0x0048_0000_u32.to_be_bytes());
+    // Reserved
+    payload.extend_from_slice(&0u32.to_be_bytes());
+    // Frame count
+    payload.extend_from_slice(&1u16.to_be_bytes());
+    // Compressor name (32 bytes, empty)
+    payload.extend_from_slice(&[0u8; 32]);
+    // Depth (24-bit)
+    payload.extend_from_slice(&0x0018u16.to_be_bytes());
+    // Pre-defined (-1)
+    payload.extend_from_slice(&0xffffu16.to_be_bytes());
+    // vpcC box
+    let vpcc_box = build_vpcc_box(vp9_config);
+    payload.extend_from_slice(&vpcc_box);
+    build_box(b"vp09", &payload)
+}
+
+/// Build a vpcC configuration box for VP9.
+///
+/// Based on VP9 Codec ISO Media File Format Binding specification.
+fn build_vpcc_box(vp9_config: &Vp9Config) -> Vec<u8> {
+    let payload = vec![
+        1,                              // Version (1 byte) - set to 1
+        vp9_config.profile,             // Profile (1 byte)
+        0,                              // Level (1 byte) - TODO: Parse from frame header
+        vp9_config.bit_depth,           // Bit depth (1 byte)
+        vp9_config.color_space,         // Color space (1 byte)
+        vp9_config.transfer_function,   // Transfer function (1 byte)
+        vp9_config.matrix_coefficients, // Matrix coefficients (1 byte)
+        0, // Video full range flag (1 byte) - TODO: Parse from frame header
+    ];
+
+    build_box(b"vpcC", &payload)
+}
+
 fn build_vmhd_box() -> Vec<u8> {
     let mut payload = Vec::new();
     payload.extend_from_slice(&0u32.to_be_bytes());
@@ -1980,15 +2137,19 @@ fn encode_language_code(language: &str) -> [u8; 2] {
     let c1 = chars.first().copied().unwrap_or('u') as u16;
     let c2 = chars.get(1).copied().unwrap_or('n') as u16;
     let c3 = chars.get(2).copied().unwrap_or('d') as u16;
-    
-    let packed = ((c1.saturating_sub(0x60) & 0x1F) << 10) |
-                 ((c2.saturating_sub(0x60) & 0x1F) << 5) |
-                 (c3.saturating_sub(0x60) & 0x1F);
-    
+
+    let packed = ((c1.saturating_sub(0x60) & 0x1F) << 10)
+        | ((c2.saturating_sub(0x60) & 0x1F) << 5)
+        | (c3.saturating_sub(0x60) & 0x1F);
+
     packed.to_be_bytes()
 }
 
-fn build_mdhd_box_with_timescale_and_duration(timescale: u32, duration: u64, language: Option<&str>) -> Vec<u8> {
+fn build_mdhd_box_with_timescale_and_duration(
+    timescale: u32,
+    duration: u64,
+    language: Option<&str>,
+) -> Vec<u8> {
     let mut payload = Vec::new();
     payload.extend_from_slice(&0u32.to_be_bytes()); // version + flags
     payload.extend_from_slice(&0u32.to_be_bytes()); // creation_time
@@ -2264,7 +2425,7 @@ mod tests {
             Mp4WriterError::FirstFrameMissingSpsPps,
             Mp4WriterError::FirstFrameMissingSequenceHeader,
             Mp4WriterError::InvalidAdts,
-            Mp4WriterError::InvalidAdtsDetailed(AdtsValidationError {
+            Mp4WriterError::InvalidAdtsDetailed(Box::new(AdtsValidationError {
                 kind: AdtsErrorKind::FrameTooShort,
                 severity: ErrorSeverity::Error,
                 byte_offset: 5,
@@ -2275,7 +2436,7 @@ mod tests {
                 code_example: None,
                 technical_details: Some("ADTS header requires minimum 7 bytes: syncword (2 bytes), MPEG info (1 byte), frame length (3 bytes partial), buffer fullness (2 bytes partial).".to_string()),
                 related_errors: Vec::new(),
-            }),
+            })),
             Mp4WriterError::InvalidOpusPacket,
             Mp4WriterError::AudioNotEnabled,
             Mp4WriterError::DurationOverflow,
@@ -2469,34 +2630,58 @@ mod tests {
         // Test frame too short
         let short_frame = vec![0xFF, 0xF1, 0x4C];
         let result = adts_to_raw(&short_frame);
-        assert!(matches!(result, Err(AdtsValidationError { kind: AdtsErrorKind::FrameTooShort, .. })));
+        assert!(matches!(
+            result,
+            Err(AdtsValidationError {
+                kind: AdtsErrorKind::FrameTooShort,
+                ..
+            })
+        ));
 
         // Test invalid syncword
         let bad_sync = vec![
             0xFE, 0xF1, // Invalid syncword
-            0x4C, 0x80, 0x1F, 0xFC, 0x00, 0x00,
-            0x21, 0x00, 0x49, 0x90, 0x02, 0x19, 0x00, 0x23, 0x80,
+            0x4C, 0x80, 0x1F, 0xFC, 0x00, 0x00, 0x21, 0x00, 0x49, 0x90, 0x02, 0x19, 0x00, 0x23,
+            0x80,
         ];
         let result = adts_to_raw(&bad_sync);
-        assert!(matches!(result, Err(AdtsValidationError { kind: AdtsErrorKind::MissingSyncword, .. })));
+        assert!(matches!(
+            result,
+            Err(AdtsValidationError {
+                kind: AdtsErrorKind::MissingSyncword,
+                ..
+            })
+        ));
 
         // Test invalid MPEG version (MPEG-2)
         let mpeg2_frame = vec![
             0xFF, 0xF9, // MPEG-2 bit set
-            0x4C, 0x80, 0x1F, 0xFC, 0x00, 0x00,
-            0x21, 0x00, 0x49, 0x90, 0x02, 0x19, 0x00, 0x23, 0x80,
+            0x4C, 0x80, 0x1F, 0xFC, 0x00, 0x00, 0x21, 0x00, 0x49, 0x90, 0x02, 0x19, 0x00, 0x23,
+            0x80,
         ];
         let result = adts_to_raw(&mpeg2_frame);
-        assert!(matches!(result, Err(AdtsValidationError { kind: AdtsErrorKind::InvalidMpegVersion, .. })));
+        assert!(matches!(
+            result,
+            Err(AdtsValidationError {
+                kind: AdtsErrorKind::InvalidMpegVersion,
+                ..
+            })
+        ));
 
         // Test invalid layer (not AAC)
         let non_aac_layer = vec![
             0xFF, 0xF5, // Layer set to 01 (Layer 3)
-            0x4C, 0x80, 0x1F, 0xFC, 0x00, 0x00,
-            0x21, 0x00, 0x49, 0x90, 0x02, 0x19, 0x00, 0x23, 0x80,
+            0x4C, 0x80, 0x1F, 0xFC, 0x00, 0x00, 0x21, 0x00, 0x49, 0x90, 0x02, 0x19, 0x00, 0x23,
+            0x80,
         ];
         let result = adts_to_raw(&non_aac_layer);
-        assert!(matches!(result, Err(AdtsValidationError { kind: AdtsErrorKind::InvalidLayer, .. })));
+        assert!(matches!(
+            result,
+            Err(AdtsValidationError {
+                kind: AdtsErrorKind::InvalidLayer,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -2505,7 +2690,7 @@ mod tests {
         assert_eq!(build_audio_specific_config(44100, 2), [0x12, 0x10]); // 44100 Hz, stereo
         assert_eq!(build_audio_specific_config(48000, 2), [0x11, 0x90]); // 48000 Hz, stereo
         assert_eq!(build_audio_specific_config(22050, 1), [0x13, 0x88]); // 22050 Hz, mono
-        assert_eq!(build_audio_specific_config(8000, 1), [0x15, 0x88]);  // 8000 Hz, mono
+        assert_eq!(build_audio_specific_config(8000, 1), [0x15, 0x88]); // 8000 Hz, mono
     }
 
     #[test]
@@ -2515,7 +2700,7 @@ mod tests {
 
         // Test channel limits (max 15 channels)
         assert_eq!(build_audio_specific_config(44100, 16), [0x12, 0x78]); // 15 channels max
-        assert_eq!(build_audio_specific_config(44100, 0), [0x12, 0x00]);  // 0 channels
+        assert_eq!(build_audio_specific_config(44100, 0), [0x12, 0x00]); // 0 channels
     }
 
     #[test]
@@ -2582,7 +2767,7 @@ mod tests {
         assert_eq!(box_data[8..12], [0, 0, 0, 0]); // version/flags = 0
         assert_eq!(box_data[12..16], [0, 0, 0, 0]); // sample_size = 0 (variable)
         assert_eq!(box_data[16..20], [0, 0, 0, 3]); // sample_count = 3
-        // Individual sizes
+                                                    // Individual sizes
         assert_eq!(box_data[20..24], [0, 0, 0x04, 0x00]); // size[0] = 1024
         assert_eq!(box_data[24..28], [0, 0, 0x04, 0x00]); // size[1] = 1024
         assert_eq!(box_data[28..32], [0, 0, 0x04, 0x00]); // size[2] = 1024

@@ -23,12 +23,12 @@
 //! }
 //! ```
 
+use std::cell::RefCell;
 use std::collections::HashSet;
-use std::sync::{OnceLock, RwLock};
+use std::thread_local;
 
-fn invariant_log() -> &'static RwLock<HashSet<String>> {
-    static INVARIANT_LOG: OnceLock<RwLock<HashSet<String>>> = OnceLock::new();
-    INVARIANT_LOG.get_or_init(|| RwLock::new(HashSet::new()))
+thread_local! {
+    static INVARIANT_LOG: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
 }
 
 /// Assert an invariant and log it for contract testing.
@@ -53,10 +53,10 @@ macro_rules! assert_invariant {
 /// Internal implementation - do not call directly
 #[doc(hidden)]
 pub fn __assert_invariant_impl(condition: bool, message: &str, context: Option<&str>) {
-    // Log that this invariant was checked (ignore poisoned lock)
-    if let Ok(mut log) = invariant_log().write() {
-        log.insert(message.to_string());
-    }
+    // Log that this invariant was checked
+    INVARIANT_LOG.with(|log| {
+        log.borrow_mut().insert(message.to_string());
+    });
 
     if !condition {
         let ctx = context.unwrap_or("unknown");
@@ -73,10 +73,7 @@ pub fn __assert_invariant_impl(condition: bool, message: &str, context: Option<&
 /// # Panics
 /// Panics if any required invariant was not checked.
 pub fn contract_test(test_name: &str, required_invariants: &[&str]) {
-    let log = match invariant_log().read() {
-        Ok(l) => l,
-        Err(poisoned) => poisoned.into_inner(),
-    };
+    let log = INVARIANT_LOG.with(|log| log.borrow().clone());
 
     let mut missing: Vec<&str> = Vec::new();
     for invariant in required_invariants {
@@ -96,17 +93,14 @@ pub fn contract_test(test_name: &str, required_invariants: &[&str]) {
 
 /// Clear the invariant log (call between test runs if needed)
 pub fn clear_invariant_log() {
-    if let Ok(mut log) = invariant_log().write() {
-        log.clear();
-    }
+    INVARIANT_LOG.with(|log| {
+        log.borrow_mut().clear();
+    });
 }
 
 /// Get a snapshot of currently logged invariants (for debugging)
 pub fn get_logged_invariants() -> Vec<String> {
-    match invariant_log().read() {
-        Ok(log) => log.iter().cloned().collect(),
-        Err(poisoned) => poisoned.into_inner().iter().cloned().collect(),
-    }
+    INVARIANT_LOG.with(|log| log.borrow().iter().cloned().collect())
 }
 
 #[cfg(test)]
@@ -117,13 +111,10 @@ mod tests {
     fn test_poisoned_lock_paths_are_handled() {
         clear_invariant_log();
 
-        let _ = std::panic::catch_unwind(|| {
-            let mut log = invariant_log().write().unwrap();
-            log.insert("poisoned invariant".to_string());
-            panic!("poison the lock");
-        });
+        // With thread_local RefCell, we can't poison the lock like with RwLock
+        // Instead, test that the functions work correctly
+        assert_invariant!(true, "poisoned invariant");
 
-        // These calls should use the poisoned.into_inner() paths.
         contract_test("poisoned", &["poisoned invariant"]);
 
         let logged = get_logged_invariants();

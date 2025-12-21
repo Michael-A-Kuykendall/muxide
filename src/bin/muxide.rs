@@ -7,7 +7,7 @@ use clap::{Parser, Subcommand};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::Serialize;
 
-use muxide::api::{MuxerBuilder, Muxer, VideoCodec, AudioCodec, AacProfile, Metadata};
+use muxide::api::{AacProfile, AudioCodec, Metadata, Muxer, MuxerBuilder, VideoCodec};
 use muxide::assert_invariant;
 
 fn read_hex_bytes(contents: &str) -> Vec<u8> {
@@ -168,9 +168,10 @@ impl ProgressReporter {
             let pb = ProgressBar::new_spinner();
             pb.set_style(
                 ProgressStyle::with_template(
-                    "{spinner:.green} [{elapsed_precise}] {msg} ({bytes_per_sec})"
-                ).unwrap()
-                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+                    "{spinner:.green} [{elapsed_precise}] {msg} ({bytes_per_sec})",
+                )
+                .unwrap()
+                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
             );
             pb.set_message("Muxing frames...");
             Some(pb)
@@ -187,16 +188,20 @@ impl ProgressReporter {
     fn update_video_frame(&mut self) {
         self.stats.video_frames += 1;
         if let Some(pb) = &self.progress {
-            pb.set_message(format!("Muxing frames... (video: {}, audio: {})",
-                self.stats.video_frames, self.stats.audio_frames));
+            pb.set_message(format!(
+                "Muxing frames... (video: {}, audio: {})",
+                self.stats.video_frames, self.stats.audio_frames
+            ));
         }
     }
 
     fn update_audio_frame(&mut self) {
         self.stats.audio_frames += 1;
         if let Some(pb) = &self.progress {
-            pb.set_message(format!("Muxing frames... (video: {}, audio: {})",
-                self.stats.video_frames, self.stats.audio_frames));
+            pb.set_message(format!(
+                "Muxing frames... (video: {}, audio: {})",
+                self.stats.video_frames, self.stats.audio_frames
+            ));
         }
     }
 
@@ -243,23 +248,38 @@ fn main() -> Result<()> {
         } => {
             let progress = ProgressReporter::new(!cli.no_progress);
             mux_command(
-                video, audio, output, video_codec, width, height, fps,
-                audio_codec, sample_rate, channels, fragmented, fragment_duration_ms,
-                title, language, creation_time,
-                progress, cli.verbose, cli.json,
+                video,
+                audio,
+                output,
+                video_codec,
+                width,
+                height,
+                fps,
+                audio_codec,
+                sample_rate,
+                channels,
+                fragmented,
+                fragment_duration_ms,
+                title,
+                language,
+                creation_time,
+                progress,
+                cli.verbose,
+                cli.json,
             )
         }
 
-        Commands::Validate { video, audio, output } => {
-            validate_command(video, audio, output, cli.verbose, cli.json)
-        }
+        Commands::Validate {
+            video,
+            audio,
+            output,
+        } => validate_command(video, audio, output, cli.verbose, cli.json),
 
-        Commands::Info { input } => {
-            info_command(input, cli.verbose, cli.json)
-        }
+        Commands::Info { input } => info_command(input, cli.verbose, cli.json),
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn mux_command(
     video: Option<PathBuf>,
     audio: Option<PathBuf>,
@@ -308,7 +328,9 @@ fn mux_command(
     }
 
     if video.is_some() && (width.is_none() || height.is_none() || fps.is_none()) {
-        anyhow::bail!("Video parameters --width, --height, and --fps are required when using --video");
+        anyhow::bail!(
+            "Video parameters --width, --height, and --fps are required when using --video"
+        );
     }
 
     // Store paths for later use
@@ -330,9 +352,6 @@ fn mux_command(
 
     // Configure video if provided
     if let (Some(_video), Some(width), Some(height), Some(fps)) = (&video, width, height, fps) {
-        let width = width;
-        let height = height;
-        let fps = fps;
         let codec = video_codec.unwrap_or(VideoCodec::H264); // Default to H.264
 
         // Invariant: Video codec must be supported
@@ -359,15 +378,15 @@ fn mux_command(
         );
 
         if verbose {
-            eprintln!("Configured video: {} {}x{} @ {}fps",
-                codec, width, height, fps);
+            eprintln!(
+                "Configured video: {} {}x{} @ {}fps",
+                codec, width, height, fps
+            );
         }
     }
 
     // Configure audio if provided
     if let (Some(_audio), Some(sample_rate), Some(channels)) = (&audio, sample_rate, channels) {
-        let sample_rate = sample_rate;
-        let channels = channels;
         let codec = audio_codec.unwrap_or(AudioCodec::Aac(AacProfile::Lc)); // Default to AAC LC
 
         // Invariant: Audio codec must be supported
@@ -394,13 +413,16 @@ fn mux_command(
         );
 
         if verbose {
-            eprintln!("Configured audio: {} {}Hz {}ch",
+            eprintln!(
+                "Configured audio: {} {}Hz {}ch",
                 match codec {
                     AudioCodec::Aac(profile) => format!("AAC-{}", profile),
                     AudioCodec::Opus => "Opus".to_string(),
                     AudioCodec::None => "None".to_string(),
                 },
-                sample_rate, channels);
+                sample_rate,
+                channels
+            );
         }
     }
 
@@ -418,8 +440,7 @@ fn mux_command(
     }
 
     // Build the muxer
-    let mut muxer = builder.build()
-        .with_context(|| "Failed to build muxer")?;
+    let mut muxer = builder.build().with_context(|| "Failed to build muxer")?;
 
     // Process video frames
     if let Some(video_path) = video_path {
@@ -450,8 +471,7 @@ fn mux_command(
         "cli::mux_command"
     );
 
-    muxer.finish()
-        .with_context(|| "Failed to finalize MP4")?;
+    muxer.finish().with_context(|| "Failed to finalize MP4")?;
 
     let stats = progress.finish()?;
 
@@ -490,14 +510,16 @@ fn process_video_frames(
 
     let mut reader = BufReader::new(file);
     let mut hex_content = String::new();
-    reader.read_to_string(&mut hex_content)
+    reader
+        .read_to_string(&mut hex_content)
         .with_context(|| "Failed to read video data")?;
 
     // Convert hex string to bytes (like the example does)
     let data = read_hex_bytes(&hex_content);
 
     // Write the frame (assuming it's a keyframe at time 0)
-    muxer.write_video(0.0, &data, true)
+    muxer
+        .write_video(0.0, &data, true)
         .with_context(|| "Failed to write video frame")?;
 
     progress.update_video_frame();
@@ -521,14 +543,16 @@ fn process_audio_frames(
 
     let mut reader = BufReader::new(file);
     let mut hex_content = String::new();
-    reader.read_to_string(&mut hex_content)
+    reader
+        .read_to_string(&mut hex_content)
         .with_context(|| "Failed to read audio data")?;
 
     // Convert hex string to bytes
     let data = read_hex_bytes(&hex_content);
 
     // Write the frame at time 0
-    muxer.write_audio(0.0, &data)
+    muxer
+        .write_audio(0.0, &data)
         .with_context(|| "Failed to write audio frame")?;
 
     progress.update_audio_frame();
@@ -568,11 +592,7 @@ fn validate_command(
     Ok(())
 }
 
-fn info_command(
-    input: PathBuf,
-    verbose: bool,
-    json: bool,
-) -> Result<()> {
+fn info_command(input: PathBuf, verbose: bool, json: bool) -> Result<()> {
     if verbose {
         eprintln!("Analyzing file: {}", input.display());
     }

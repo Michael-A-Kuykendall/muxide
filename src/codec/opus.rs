@@ -129,6 +129,8 @@ impl OpusFrameDuration {
     }
 }
 
+use crate::assert_invariant;
+
 /// Extract frame duration from the Opus TOC byte.
 ///
 /// The TOC byte encodes the frame configuration:
@@ -139,6 +141,11 @@ impl OpusFrameDuration {
 pub fn opus_frame_duration_from_toc(toc: u8) -> Option<OpusFrameDuration> {
     // Extract config bits (bits 3-7)
     let config = (toc >> 3) & 0x1F;
+
+    assert_invariant!(
+        config <= 31,
+        "INV-600: Opus TOC config must be valid (0-31)"
+    );
 
     // Frame size depends on config value
     // See RFC 6716 Section 3.1
@@ -163,12 +170,15 @@ pub fn opus_frame_duration_from_toc(toc: u8) -> Option<OpusFrameDuration> {
 /// Opus packets can contain 1, 2, or a variable number of frames.
 /// Returns (frame_count, is_vbr) where is_vbr indicates variable bitrate.
 pub fn opus_frame_count(packet: &[u8]) -> Option<(u8, bool)> {
-    if packet.is_empty() {
-        return None;
-    }
+    assert_invariant!(
+        !packet.is_empty(),
+        "INV-601: Opus frame count requires non-empty packet"
+    );
 
     let toc = packet[0];
     let code = toc & 0x03;
+
+    assert_invariant!(code <= 3, "INV-602: Opus TOC code must be valid (0-3)");
 
     match code {
         0 => Some((1, false)), // 1 frame
@@ -176,12 +186,17 @@ pub fn opus_frame_count(packet: &[u8]) -> Option<(u8, bool)> {
         2 => Some((2, true)),  // 2 frames, different sizes
         3 => {
             // Code 3: arbitrary number of frames
-            if packet.len() < 2 {
-                return None;
-            }
+            assert_invariant!(
+                packet.len() >= 2,
+                "INV-603: Opus code 3 requires at least 2 bytes"
+            );
+
             let frame_count_byte = packet[1];
             let is_vbr = (frame_count_byte & 0x80) != 0;
             let count = frame_count_byte & 0x3F;
+
+            assert_invariant!(count > 0, "INV-604: Opus frame count must be non-zero");
+
             Some((count, is_vbr))
         }
         _ => None,
@@ -192,14 +207,24 @@ pub fn opus_frame_count(packet: &[u8]) -> Option<(u8, bool)> {
 ///
 /// Returns the total number of samples (at 48kHz) in the packet.
 pub fn opus_packet_samples(packet: &[u8]) -> Option<u32> {
-    if packet.is_empty() {
-        return None;
-    }
+    assert_invariant!(
+        !packet.is_empty(),
+        "INV-605: Opus packet samples requires non-empty packet"
+    );
 
     let frame_duration = opus_frame_duration_from_toc(packet[0])?;
     let (frame_count, _) = opus_frame_count(packet)?;
 
-    Some(frame_duration.samples() * frame_count as u32)
+    assert_invariant!(
+        (1..=63).contains(&frame_count),
+        "INV-606: Opus frame count must be reasonable (1-63)"
+    );
+
+    let samples = frame_duration.samples() * frame_count as u32;
+
+    assert_invariant!(samples > 0, "INV-607: Opus packet samples must be positive");
+
+    Some(samples)
 }
 
 /// Validate an Opus packet for basic structural correctness.

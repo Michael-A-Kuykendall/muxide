@@ -3,15 +3,15 @@ name = "muxide"
 version = "0.1.2"
 edition = "2021"
 rust-version = "1.70"
-description = "Zero-dependency pure-Rust MP4 muxer for recording applications"
+description = "Zero-dependency pure-Rust MP4 muxer for recording applications. Includes CLI tool and library API."
 authors = ["Michael A. Kuykendall <michaelallenkuykendall@gmail.com>"]
 readme = "README.md"
 repository = "https://github.com/Michael-A-Kuykendall/muxide"
 homepage = "https://github.com/Michael-A-Kuykendall/muxide"
 documentation = "https://docs.rs/muxide"
 license = "MIT"
-keywords = ["mp4", "video", "muxer", "h264", "multimedia"]
-categories = ["multimedia", "multimedia::encoding", "multimedia::video"]
+keywords = ["mp4", "video", "muxer", "h264", "multimedia", "cli", "encoding", "avc", "hevc", "av1", "aac", "opus"]
+categories = ["multimedia", "multimedia::encoding", "multimedia::video", "command-line-utilities"]
 exclude = [
 	".github/",
 	".vscode/",

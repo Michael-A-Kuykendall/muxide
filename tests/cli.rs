@@ -1,14 +1,11 @@
-use std::fs;
-use std::process::Command;
 use std::path::PathBuf;
-
-use muxide::api::{MuxerBuilder, Muxer, VideoCodec, AudioCodec, AacProfile};
+use std::process::Command;
 
 /// Test CLI help output
 #[test]
 fn cli_help_works() {
     let output = Command::new("cargo")
-        .args(&["run", "--bin", "muxide", "--", "--help"])
+        .args(["run", "--bin", "muxide", "--", "--help"])
         .output()
         .expect("Failed to run CLI");
 
@@ -24,7 +21,7 @@ fn cli_help_works() {
 #[test]
 fn cli_mux_help_works() {
     let output = Command::new("cargo")
-        .args(&["run", "--bin", "muxide", "--", "mux", "--help"])
+        .args(["run", "--bin", "muxide", "--", "mux", "--help"])
         .output()
         .expect("Failed to run CLI");
 
@@ -46,14 +43,22 @@ fn cli_mux_video_only() {
     let video_fixture = PathBuf::from("fixtures/video_samples/frame0_key.264");
 
     let output = Command::new("cargo")
-        .args(&[
-            "run", "--bin", "muxide", "--",
+        .args([
+            "run",
+            "--bin",
+            "muxide",
+            "--",
             "mux",
-            "--video", video_fixture.to_str().unwrap(),
-            "--width", "1920",
-            "--height", "1080",
-            "--fps", "30",
-            "--output", output_path.to_str().unwrap(),
+            "--video",
+            video_fixture.to_str().unwrap(),
+            "--width",
+            "1920",
+            "--height",
+            "1080",
+            "--fps",
+            "30",
+            "--output",
+            output_path.to_str().unwrap(),
         ])
         .output()
         .expect("Failed to run CLI");
@@ -75,17 +80,28 @@ fn cli_mux_video_and_audio() {
     let audio_fixture = PathBuf::from("fixtures/audio_samples/frame0.aac.adts");
 
     let output = Command::new("cargo")
-        .args(&[
-            "run", "--bin", "muxide", "--",
+        .args([
+            "run",
+            "--bin",
+            "muxide",
+            "--",
             "mux",
-            "--video", video_fixture.to_str().unwrap(),
-            "--audio", audio_fixture.to_str().unwrap(),
-            "--width", "1920",
-            "--height", "1080",
-            "--fps", "30",
-            "--sample-rate", "44100",
-            "--channels", "2",
-            "--output", output_path.to_str().unwrap(),
+            "--video",
+            video_fixture.to_str().unwrap(),
+            "--audio",
+            audio_fixture.to_str().unwrap(),
+            "--width",
+            "1920",
+            "--height",
+            "1080",
+            "--fps",
+            "30",
+            "--sample-rate",
+            "44100",
+            "--channels",
+            "2",
+            "--output",
+            output_path.to_str().unwrap(),
         ])
         .output()
         .expect("Failed to run CLI");
@@ -107,16 +123,26 @@ fn cli_mux_with_metadata() {
     let video_fixture = PathBuf::from("fixtures/video_samples/frame0_key.264");
 
     let output = Command::new("cargo")
-        .args(&[
-            "run", "--bin", "muxide", "--",
+        .args([
+            "run",
+            "--bin",
+            "muxide",
+            "--",
             "mux",
-            "--video", video_fixture.to_str().unwrap(),
-            "--width", "1920",
-            "--height", "1080",
-            "--fps", "30",
-            "--title", "Test Recording",
-            "--language", "eng",
-            "--output", output_path.to_str().unwrap(),
+            "--video",
+            video_fixture.to_str().unwrap(),
+            "--width",
+            "1920",
+            "--height",
+            "1080",
+            "--fps",
+            "30",
+            "--title",
+            "Test Recording",
+            "--language",
+            "eng",
+            "--output",
+            output_path.to_str().unwrap(),
         ])
         .output()
         .expect("Failed to run CLI");
@@ -136,16 +162,25 @@ fn cli_mux_different_video_codecs() {
     let video_fixture = PathBuf::from("fixtures/video_samples/frame0_key.264");
 
     let output = Command::new("cargo")
-        .args(&[
-            "run", "--bin", "muxide", "--",
+        .args([
+            "run",
+            "--bin",
+            "muxide",
+            "--",
             "--verbose",
             "mux",
-            "--video", video_fixture.to_str().unwrap(),
-            "--video-codec", "h264",
-            "--width", "1920",
-            "--height", "1080",
-            "--fps", "30",
-            "--output", output_path.to_str().unwrap(),
+            "--video",
+            video_fixture.to_str().unwrap(),
+            "--video-codec",
+            "h264",
+            "--width",
+            "1920",
+            "--height",
+            "1080",
+            "--fps",
+            "30",
+            "--output",
+            output_path.to_str().unwrap(),
         ])
         .output()
         .expect("Failed to run CLI");
@@ -166,20 +201,33 @@ fn cli_mux_different_audio_codecs() {
     let audio_fixture = PathBuf::from("fixtures/audio_samples/frame0.aac.adts");
 
     let output = Command::new("cargo")
-        .args(&[
-            "run", "--bin", "muxide", "--",
+        .args([
+            "run",
+            "--bin",
+            "muxide",
+            "--",
             "--verbose",
             "mux",
-            "--video", video_fixture.to_str().unwrap(),
-            "--audio", audio_fixture.to_str().unwrap(),
-            "--video-codec", "h264",
-            "--audio-codec", "aac-he",
-            "--width", "1920",
-            "--height", "1080",
-            "--fps", "30",
-            "--sample-rate", "44100",
-            "--channels", "2",
-            "--output", output_path.to_str().unwrap(),
+            "--video",
+            video_fixture.to_str().unwrap(),
+            "--audio",
+            audio_fixture.to_str().unwrap(),
+            "--video-codec",
+            "h264",
+            "--audio-codec",
+            "aac-he",
+            "--width",
+            "1920",
+            "--height",
+            "1080",
+            "--fps",
+            "30",
+            "--sample-rate",
+            "44100",
+            "--channels",
+            "2",
+            "--output",
+            output_path.to_str().unwrap(),
         ])
         .output()
         .expect("Failed to run CLI");
@@ -194,7 +242,7 @@ fn cli_mux_different_audio_codecs() {
 #[test]
 fn cli_validate_command() {
     let output = Command::new("cargo")
-        .args(&["run", "--bin", "muxide", "--", "validate"])
+        .args(["run", "--bin", "muxide", "--", "validate"])
         .output()
         .expect("Failed to run CLI");
 
@@ -207,7 +255,7 @@ fn cli_validate_command() {
 #[test]
 fn cli_info_command() {
     let output = Command::new("cargo")
-        .args(&["run", "--bin", "muxide", "--", "info", "nonexistent.mp4"])
+        .args(["run", "--bin", "muxide", "--", "info", "nonexistent.mp4"])
         .output()
         .expect("Failed to run CLI");
 
@@ -223,11 +271,16 @@ fn cli_error_missing_video_params() {
     let output_path = temp_dir.path().join("test_error.mp4");
 
     let output = Command::new("cargo")
-        .args(&[
-            "run", "--bin", "muxide", "--",
+        .args([
+            "run",
+            "--bin",
+            "muxide",
+            "--",
             "mux",
-            "--video", "fixtures/video_samples/frame0_key.264",
-            "--output", output_path.to_str().unwrap(),
+            "--video",
+            "fixtures/video_samples/frame0_key.264",
+            "--output",
+            output_path.to_str().unwrap(),
         ])
         .output()
         .expect("Failed to run CLI");
@@ -244,10 +297,14 @@ fn cli_error_no_inputs() {
     let output_path = temp_dir.path().join("test_error.mp4");
 
     let output = Command::new("cargo")
-        .args(&[
-            "run", "--bin", "muxide", "--",
+        .args([
+            "run",
+            "--bin",
+            "muxide",
+            "--",
             "mux",
-            "--output", output_path.to_str().unwrap(),
+            "--output",
+            output_path.to_str().unwrap(),
         ])
         .output()
         .expect("Failed to run CLI");
@@ -266,15 +323,23 @@ fn cli_json_output() {
     let video_fixture = PathBuf::from("fixtures/video_samples/frame0_key.264");
 
     let output = Command::new("cargo")
-        .args(&[
-            "run", "--bin", "muxide", "--",
+        .args([
+            "run",
+            "--bin",
+            "muxide",
+            "--",
             "--json",
             "mux",
-            "--video", video_fixture.to_str().unwrap(),
-            "--width", "1920",
-            "--height", "1080",
-            "--fps", "30",
-            "--output", output_path.to_str().unwrap(),
+            "--video",
+            video_fixture.to_str().unwrap(),
+            "--width",
+            "1920",
+            "--height",
+            "1080",
+            "--fps",
+            "30",
+            "--output",
+            output_path.to_str().unwrap(),
         ])
         .output()
         .expect("Failed to run CLI");
@@ -299,15 +364,23 @@ fn cli_verbose_output() {
     let video_fixture = PathBuf::from("fixtures/video_samples/frame0_key.264");
 
     let output = Command::new("cargo")
-        .args(&[
-            "run", "--bin", "muxide", "--",
+        .args([
+            "run",
+            "--bin",
+            "muxide",
+            "--",
             "--verbose",
             "mux",
-            "--video", video_fixture.to_str().unwrap(),
-            "--width", "1920",
-            "--height", "1080",
-            "--fps", "30",
-            "--output", output_path.to_str().unwrap(),
+            "--video",
+            video_fixture.to_str().unwrap(),
+            "--width",
+            "1920",
+            "--height",
+            "1080",
+            "--fps",
+            "30",
+            "--output",
+            output_path.to_str().unwrap(),
         ])
         .output()
         .expect("Failed to run CLI");

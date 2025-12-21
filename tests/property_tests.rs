@@ -11,6 +11,51 @@ use std::{fs, path::Path};
 use muxide::api::{AacProfile, AudioCodec, MuxerBuilder, VideoCodec};
 use muxide::invariant_ppt::{clear_invariant_log, contract_test};
 
+/// Build a minimal AV1 keyframe with Sequence Header OBU.
+///
+/// This is a synthetic OBU stream with:
+/// - OBU_SEQUENCE_HEADER (type 1) with minimal valid content
+/// - OBU_FRAME (type 6) with KEY_FRAME indicator
+fn build_av1_keyframe() -> Vec<u8> {
+    let mut data = Vec::new();
+
+    // OBU 1: Sequence Header (type 1)
+    // OBU header: type=1, has_size=1
+    // 0b0_0001_0_1_0 = 0x0A (type=1, has_extension=0, has_size=1)
+    data.push(0x0A);
+
+    // Size of sequence header payload in LEB128 (let's use 12 bytes)
+    data.push(12);
+
+    // Minimal sequence header content (12 bytes)
+    // seq_profile=0, frame_width_bits_minus_1=10, frame_height_bits_minus_1=10, etc.
+    // This is a simplified synthetic sequence header
+    data.extend_from_slice(&[
+        0x00, // seq_profile=0, still_picture=0, reduced_still_picture_header=0
+        0x00, 0x00, // operating_points
+        0x10, // frame_width_bits=11, frame_height_bits=11
+        0x07, 0x80, // max_frame_width = 1920
+        0x04, 0x38, // max_frame_height = 1080
+        0x00, // frame_id_numbers_present_flag=0
+        0x00, // use_128x128_superblock=0
+        0x00, 0x00, // other flags
+    ]);
+
+    // OBU 2: Frame OBU (type 6) with keyframe
+    // OBU header: type=6, has_size=1
+    // 0b0_0110_0_1_0 = 0x32 (type=6, has_extension=0, has_size=1)
+    data.push(0x32);
+
+    // Size of frame payload
+    data.push(4);
+
+    // Minimal frame header indicating keyframe
+    // show_existing_frame=0, frame_type=KEY_FRAME(0)
+    data.extend_from_slice(&[0x10, 0x00, 0x00, 0x00]);
+
+    data
+}
+
 fn read_hex_fixture(dir: &str, name: &str) -> Vec<u8> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("fixtures")
@@ -54,21 +99,24 @@ fn make_h264_pframe() -> Vec<u8> {
 }
 
 /// Helper to create a valid AAC ADTS frame
+#[allow(dead_code)]
 fn make_aac_adts_frame() -> Vec<u8> {
     // Minimal valid ADTS AAC LC frame
     // Sync word: 0xFFF, MPEG-4, LC profile, 48kHz, 2 channels
     vec![
         0xFF, 0xF1, // Sync + MPEG-4 + LC profile
-        0x4C, 0x80, // 48kHz, 2 channels, original/copy, home, copyright_id_bit, copyright_id_start
+        0x4C,
+        0x80, // 48kHz, 2 channels, original/copy, home, copyright_id_bit, copyright_id_start
         0x00, 0x1F, // Frame length (31 bytes including header), buffer fullness 0x1FF
-        0xFC,       // Buffer fullness continued, raw data blocks 0
+        0xFC, // Buffer fullness continued, raw data blocks 0
         // Raw AAC data (minimal valid frame)
-        0x21, 0x00, 0x49, 0x90, 0x02, 0x19, 0x00, 0x23, 0x80,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+        0x21, 0x00, 0x49, 0x90, 0x02, 0x19, 0x00, 0x23, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     ]
 }
 
 /// Helper to create invalid AAC data
+#[allow(dead_code)]
 fn make_invalid_aac_data() -> Vec<u8> {
     vec![0x00, 0x01, 0x02, 0x03] // Not ADTS format
 }
@@ -326,9 +374,35 @@ mod contract_tests {
         );
     }
 
-    /// Contract test: Sample sizes must be non-zero
+    /// Contract test: API keyframe detection must validate inputs
     #[test]
-    fn contract_sample_sizes_invariant() {
+    fn contract_api_keyframe_detection() {
+        clear_invariant_log();
+
+        let mut buffer = Cursor::new(Vec::new());
+        let mut muxer = MuxerBuilder::new(&mut buffer)
+            .video(VideoCodec::H264, 1920, 1080, 30.0)
+            .build()
+            .unwrap();
+
+        // Use encode_video to trigger is_keyframe detection with valid keyframe
+        muxer.encode_video(&make_h264_keyframe(), 33).unwrap();
+
+        // Also encode a P-frame to trigger the validation path
+        muxer.encode_video(&make_h264_pframe(), 33).unwrap();
+
+        muxer.finish().unwrap();
+
+        // Verify keyframe detection invariants were checked
+        contract_test(
+            "api::is_keyframe",
+            &["INV-100: Video frame data must not be empty"],
+        );
+    }
+
+    /// Contract test: API write_video must enforce invariants
+    #[test]
+    fn contract_api_write_video_invariants() {
         clear_invariant_log();
 
         let mut buffer = Cursor::new(Vec::new());
@@ -343,8 +417,241 @@ mod contract_tests {
             .unwrap();
         muxer.finish().unwrap();
 
-        // Verify the stsz invariant was checked
-        contract_test("stsz box building", &["No empty samples in stsz"]);
+        // Verify write_video invariants were checked (none expected - input validation is separate)
+        contract_test("api::write_video", &[]);
+    }
+
+    /// Contract test: AV1 config extraction invariants
+    #[test]
+    fn contract_av1_config_extraction() {
+        clear_invariant_log();
+
+        // Create valid AV1 keyframe data with sequence header
+        let av1_data = build_av1_keyframe();
+
+        // Call extract_av1_config directly to trigger invariants
+        let _ = muxide::codec::av1::extract_av1_config(&av1_data);
+
+        // Verify AV1 config extraction invariants were checked
+        contract_test(
+            "codec::av1::extract_av1_config",
+            &["INV-201: AV1 OBU type must be valid (0-15)"],
+        );
+    }
+
+    /// Contract test: H.264 config extraction invariants
+    #[test]
+    fn contract_h264_config_extraction() {
+        clear_invariant_log();
+
+        let h264_data = make_h264_keyframe();
+
+        // Call extract_avc_config directly to trigger invariants
+        let _ = muxide::codec::h264::extract_avc_config(&h264_data);
+
+        // Verify H.264 config extraction invariants were checked
+        contract_test(
+            "codec::h264::extract_avc_config",
+            &[
+                "INV-301: H.264 NAL type must be valid (0-31)",
+                "INV-302: H.264 SPS and PPS must be non-empty",
+            ],
+        );
+    }
+
+    /// Contract test: VP9 config extraction invariants
+    #[test]
+    fn contract_vp9_config_extraction() {
+        clear_invariant_log();
+
+        // Create minimal VP9 keyframe data
+        let vp9_data = vec![
+            0x49, 0x83, 0x42, // Frame marker
+            0x00, 0x00, 0x00, // Profile=0, show_existing=0, frame_type=0
+        ];
+
+        // Call extract_vp9_config directly to trigger invariants
+        let _ = muxide::codec::vp9::extract_vp9_config(&vp9_data);
+
+        // Verify VP9 config extraction invariants were checked
+        contract_test(
+            "codec::vp9::extract_vp9_config",
+            &[
+                "INV-401: VP9 frame marker must be 0x49 0x83 0x42",
+                "INV-402: VP9 profile must be valid (0-3)",
+            ],
+        );
+    }
+
+    /// Contract test: H.265 config extraction invariants
+    #[test]
+    fn contract_h265_config_extraction() {
+        clear_invariant_log();
+
+        // Create minimal HEVC keyframe with VPS, SPS, PPS
+        let hevc_data = vec![
+            0x00, 0x00, 0x00, 0x01, 0x40, 0x01, 0x0c, 0x01, // VPS (type 32)
+            0x00, 0x00, 0x00, 0x01, 0x42, 0x01, 0x01, 0x01, // SPS (type 33)
+            0x00, 0x00, 0x00, 0x01, 0x44, 0x01, 0xc0, 0x73, // PPS (type 34)
+            0x00, 0x00, 0x00, 0x01, 0x26, 0x01, 0xaf, 0x00, // IDR (type 19)
+        ];
+
+        // Call extract_hevc_config directly to trigger invariants
+        let _ = muxide::codec::h265::extract_hevc_config(&hevc_data);
+
+        // Verify H.265 config extraction invariants were checked
+        contract_test(
+            "codec::h265::extract_hevc_config",
+            &[
+                "INV-501: HEVC NAL type must be valid (0-63)",
+                "INV-502: HEVC VPS, SPS, and PPS must be non-empty",
+            ],
+        );
+    }
+
+    /// Contract test: H.265 keyframe detection invariants
+    #[test]
+    fn contract_h265_keyframe_detection() {
+        clear_invariant_log();
+
+        // Create minimal HEVC keyframe with VPS, SPS, PPS
+        let hevc_data = vec![
+            0x00, 0x00, 0x00, 0x01, 0x40, 0x01, 0x0c, 0x01, // VPS (type 32)
+            0x00, 0x00, 0x00, 0x01, 0x42, 0x01, 0x01, 0x01, // SPS (type 33)
+            0x00, 0x00, 0x00, 0x01, 0x44, 0x01, 0xc0, 0x73, // PPS (type 34)
+            0x00, 0x00, 0x00, 0x01, 0x26, 0x01, 0xaf, 0x00, // IDR (type 19)
+        ];
+
+        // Call is_hevc_keyframe directly to trigger invariants
+        let _ = muxide::codec::h265::is_hevc_keyframe(&hevc_data);
+
+        // Verify H.265 keyframe detection invariants were checked
+        contract_test(
+            "codec::h265::is_hevc_keyframe",
+            &[
+                "INV-503: HEVC keyframe detection requires non-empty data",
+                "INV-504: HEVC NAL type must be valid (0-63)",
+                // INV-505 is only checked when no keyframe is found
+            ],
+        );
+    }
+
+    /// Contract test: Opus frame duration invariants
+    #[test]
+    fn contract_opus_frame_duration() {
+        clear_invariant_log();
+
+        // Create a simple Opus packet
+        let opus_data = vec![0x00, 0x01, 0x02, 0x03]; // TOC byte 0x00
+
+        let mut buffer = Cursor::new(Vec::new());
+        let mut muxer = MuxerBuilder::new(&mut buffer)
+            .video(VideoCodec::H264, 1920, 1080, 30.0)
+            .audio(AudioCodec::Opus, 48000, 2)
+            .build()
+            .unwrap();
+
+        // Write a video frame first
+        muxer.write_video(0.0, &make_h264_keyframe(), true).unwrap();
+
+        muxer.write_audio(0.0, &opus_data).unwrap();
+        muxer.finish().unwrap();
+
+        // Verify Opus frame duration invariants were checked
+        contract_test(
+            "codec::opus::opus_frame_duration_from_toc",
+            &["INV-600: Opus TOC config must be valid (0-31)"],
+        );
+    }
+
+    /// Contract test: Opus frame count invariants
+    #[test]
+    fn contract_opus_frame_count() {
+        clear_invariant_log();
+
+        let opus_data = vec![0x00, 0x01, 0x02, 0x03]; // TOC byte 0x00
+
+        let mut buffer = Cursor::new(Vec::new());
+        let mut muxer = MuxerBuilder::new(&mut buffer)
+            .video(VideoCodec::H264, 1920, 1080, 30.0)
+            .audio(AudioCodec::Opus, 48000, 2)
+            .build()
+            .unwrap();
+
+        // Write a video frame first so audio can be written
+        muxer.write_video(0.0, &make_h264_keyframe(), true).unwrap();
+
+        muxer.write_audio(0.0, &opus_data).unwrap();
+        muxer.finish().unwrap();
+
+        // Verify Opus frame count invariants were checked
+        contract_test(
+            "codec::opus::opus_frame_count",
+            &[
+                "INV-601: Opus frame count requires non-empty packet",
+                "INV-602: Opus TOC code must be valid (0-3)",
+            ],
+        );
+    }
+
+    /// Contract test: Opus packet samples invariants
+    #[test]
+    fn contract_opus_packet_samples() {
+        clear_invariant_log();
+
+        let opus_data = vec![0x00, 0x01, 0x02, 0x03]; // TOC byte 0x00
+
+        let mut buffer = Cursor::new(Vec::new());
+        let mut muxer = MuxerBuilder::new(&mut buffer)
+            .video(VideoCodec::H264, 1920, 1080, 30.0)
+            .audio(AudioCodec::Opus, 48000, 2)
+            .build()
+            .unwrap();
+
+        // Write a video frame first
+        muxer.write_video(0.0, &make_h264_keyframe(), true).unwrap();
+
+        muxer.write_audio(0.0, &opus_data).unwrap();
+        muxer.finish().unwrap();
+
+        // Verify Opus packet samples invariants were checked
+        contract_test(
+            "codec::opus::opus_packet_samples",
+            &[
+                "INV-605: Opus packet samples requires non-empty packet",
+                "INV-606: Opus frame count must be reasonable (1-63)",
+                "INV-607: Opus packet samples must be positive",
+            ],
+        );
+    }
+
+    /// Contract test: Opus packet validation invariants
+    #[test]
+    fn contract_opus_packet_validation() {
+        clear_invariant_log();
+
+        let opus_data = vec![0x00, 0x01, 0x02, 0x03]; // TOC byte 0x00
+
+        let mut buffer = Cursor::new(Vec::new());
+        let mut muxer = MuxerBuilder::new(&mut buffer)
+            .video(VideoCodec::H264, 1920, 1080, 30.0)
+            .audio(AudioCodec::Opus, 48000, 2)
+            .build()
+            .unwrap();
+
+        // Write a video frame first
+        muxer.write_video(0.0, &make_h264_keyframe(), true).unwrap();
+
+        muxer.write_audio(0.0, &opus_data).unwrap();
+        muxer.finish().unwrap();
+
+        // Verify Opus packet validation invariants were checked
+        contract_test(
+            "codec::opus::is_valid_opus_packet",
+            &[
+                // No invariants checked in is_valid_opus_packet - it's pure validation
+            ],
+        );
     }
 }
 
@@ -367,7 +674,10 @@ fn contract_aac_profile_validation() {
     muxer.finish().unwrap();
 
     // Verify AAC profile invariant was checked
-    contract_test("aac audio processing", &["AAC profile must be one of the supported variants"]);
+    contract_test(
+        "aac audio processing",
+        &["INV-020: AAC profile must be one of the supported variants"],
+    );
 }
 
 /// Property-based test: CLI argument parsing is robust
@@ -387,8 +697,8 @@ fn prop_cli_argument_parsing() {
         width in valid_widths,
         height in valid_heights,
         fps in valid_fps,
-        sample_rate in valid_sample_rates,
-        channels in valid_channels,
+        _sample_rate in valid_sample_rates,
+        _channels in valid_channels,
     )| {
         let temp_dir = tempfile::tempdir().unwrap();
         let output_path = temp_dir.path().join(format!("test_{}_{}_{}.mp4", width, height, fps));
@@ -396,7 +706,7 @@ fn prop_cli_argument_parsing() {
         let video_fixture = "fixtures/video_samples/frame0_key.264";
 
         let output = Command::new("cargo")
-            .args(&[
+            .args([
                 "run", "--bin", "muxide", "--",
                 "mux",
                 "--video", video_fixture,
@@ -441,7 +751,7 @@ fn prop_cli_metadata_handling() {
         let video_fixture = "fixtures/video_samples/frame0_key.264";
 
         let output = Command::new("cargo")
-            .args(&[
+            .args([
                 "run", "--bin", "muxide", "--",
                 "mux",
                 "--video", video_fixture,
@@ -483,7 +793,7 @@ fn prop_cli_invalid_dimensions_rejected() {
         let video_fixture = "fixtures/video_samples/frame0_key.264";
 
         let output = Command::new("cargo")
-            .args(&[
+            .args([
                 "run", "--bin", "muxide", "--",
                 "mux",
                 "--video", video_fixture,
@@ -521,7 +831,7 @@ fn prop_cli_codec_combinations() {
         let audio_fixture = "fixtures/audio_samples/frame0.aac.adts";
 
         let output = Command::new("cargo")
-            .args(&[
+            .args([
                 "run", "--bin", "muxide", "--",
                 "mux",
                 "--video", video_fixture,

@@ -24,6 +24,8 @@
 //! - Configuration box is `av1C`
 //! - Keyframes are identified by `frame_type == KEY_FRAME` in header
 
+use crate::assert_invariant;
+
 /// AV1 OBU type constants.
 pub mod obu_type {
     /// Sequence Header OBU
@@ -244,7 +246,18 @@ impl<'a> Iterator for ObuIter<'a> {
 ///
 /// Searches for the Sequence Header OBU and extracts configuration.
 pub fn extract_av1_config(data: &[u8]) -> Option<Av1Config> {
+    if data.is_empty() {
+        return None;
+    }
+
     for (info, obu_data) in ObuIter::new(data) {
+        // INV-201: OBU type must be valid
+        assert_invariant!(
+            info.obu_type <= 15,
+            "INV-201: AV1 OBU type must be valid (0-15)",
+            "codec::av1::extract_av1_config"
+        );
+
         if info.obu_type == obu_type::SEQUENCE_HEADER {
             return parse_sequence_header(obu_data, info.header_size);
         }
@@ -254,16 +267,37 @@ pub fn extract_av1_config(data: &[u8]) -> Option<Av1Config> {
 
 /// Parse the Sequence Header OBU payload to extract configuration.
 fn parse_sequence_header(obu_data: &[u8], header_size: usize) -> Option<Av1Config> {
+    // INV-202: Header size must be valid
+    assert_invariant!(
+        header_size <= obu_data.len(),
+        "AV1 header size must not exceed OBU data length",
+        "codec::av1::parse_sequence_header"
+    );
+
     let payload = &obu_data[header_size..];
     if payload.is_empty() {
         return None;
     }
+
+    // INV-203: Sequence header payload must be non-empty
+    assert_invariant!(
+        !payload.is_empty(),
+        "AV1 sequence header payload must be non-empty",
+        "codec::av1::parse_sequence_header"
+    );
 
     // Create a bit reader for the payload
     let mut reader = BitReader::new(payload);
 
     // seq_profile: 3 bits
     let seq_profile = reader.read_bits(3)? as u8;
+
+    // INV-204: Sequence profile must be valid (0-3)
+    assert_invariant!(
+        seq_profile <= 3,
+        "AV1 sequence profile must be valid (0-3)",
+        "codec::av1::parse_sequence_header"
+    );
 
     // still_picture: 1 bit
     let _still_picture = reader.read_bit()?;
@@ -862,9 +896,11 @@ mod tests {
         // Sequence header payload (simplified)
         let seq_header = [
             0x0A, 0x10, // OBU header + size
-            0x00, 0x00, 0x00, 0x00, // seq_profile=0, still_picture=0, reduced_still_picture_header=0
+            0x00, 0x00, 0x00,
+            0x00, // seq_profile=0, still_picture=0, reduced_still_picture_header=0
             0x00, 0x00, 0x00, 0x00, // timing_info_present=0, decoder_model_info_present=0
-            0x00, 0x00, 0x00, 0x00, // initial_display_delay_present=0, operating_points_cnt_minus_1=0
+            0x00, 0x00, 0x00,
+            0x00, // initial_display_delay_present=0, operating_points_cnt_minus_1=0
             0x00, 0x00, // operating_point_idc[0]=0, seq_level_idx[0]=0
             0x00, // seq_tier[0]=0
         ];

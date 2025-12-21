@@ -333,11 +333,11 @@ fn encode_language_code(language: &str) -> [u8; 2] {
     let c1 = chars.first().copied().unwrap_or('u') as u16;
     let c2 = chars.get(1).copied().unwrap_or('n') as u16;
     let c3 = chars.get(2).copied().unwrap_or('d') as u16;
-    
-    let packed = ((c1.saturating_sub(0x60) & 0x1F) << 10) |
-                 ((c2.saturating_sub(0x60) & 0x1F) << 5) |
-                 (c3.saturating_sub(0x60) & 0x1F);
-    
+
+    let packed = ((c1.saturating_sub(0x60) & 0x1F) << 10)
+        | ((c2.saturating_sub(0x60) & 0x1F) << 5)
+        | (c3.saturating_sub(0x60) & 0x1F);
+
     packed.to_be_bytes()
 }
 
