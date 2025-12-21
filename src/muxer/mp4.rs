@@ -633,10 +633,7 @@ impl<Writer: Write> Mp4Writer<Writer> {
         fast_start: bool,
     ) -> io::Result<()> {
         if self.finalized {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "mp4 writer already finalised",
-            ));
+            return Err(io::Error::other("mp4 writer already finalised"));
         }
         self.finalized = true;
 
