@@ -2,7 +2,7 @@
 name = "muxide"
 version = "0.1.2"
 edition = "2021"
-rust-version = "1.70"
+rust-version = "1.74"
 description = "Zero-dependency pure-Rust MP4 muxer for recording applications. Includes CLI tool and library API."
 authors = ["Michael A. Kuykendall <michaelallenkuykendall@gmail.com>"]
 readme = "README.md"
@@ -36,5 +36,5 @@ thiserror = "1.0"
 
 [dev-dependencies]
 lazy_static = "1.4"
-proptest = "1.4"
+proptest = "=1.5.0"
 tempfile = "3.0"
