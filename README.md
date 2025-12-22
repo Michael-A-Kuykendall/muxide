@@ -73,6 +73,12 @@ cargo install muxide
 # Or download pre-built binary from releases
 # Then use:
 muxide --help
+
+# Quick examples:
+muxide mux --video frames/ --output output.mp4 --width 1920 --height 1080 --fps 30
+muxide mux --video video.h264 --audio audio.aac --output output.mp4
+muxide validate --video frames/ --audio audio.aac
+muxide info input.mp4
 ```
 
 The CLI tool accepts raw encoded frames from stdin or files and produces MP4 output.

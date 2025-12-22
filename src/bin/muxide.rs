@@ -112,6 +112,10 @@ enum Commands {
         /// Creation time (ISO 8601)
         #[arg(long)]
         creation_time: Option<String>,
+
+        /// Validate inputs without creating output file
+        #[arg(long)]
+        dry_run: bool,
     },
 
     /// Validate frame data without muxing
@@ -245,6 +249,7 @@ fn main() -> Result<()> {
             title,
             language,
             creation_time,
+            dry_run,
         } => {
             let progress = ProgressReporter::new(!cli.no_progress);
             mux_command(
@@ -263,6 +268,7 @@ fn main() -> Result<()> {
                 title,
                 language,
                 creation_time,
+                dry_run,
                 progress,
                 cli.verbose,
                 cli.json,
@@ -296,6 +302,7 @@ fn mux_command(
     title: Option<String>,
     language: Option<String>,
     creation_time: Option<String>,
+    dry_run: bool,
     mut progress: ProgressReporter,
     verbose: bool,
     json: bool,
@@ -331,6 +338,51 @@ fn mux_command(
         anyhow::bail!(
             "Video parameters --width, --height, and --fps are required when using --video"
         );
+    }
+
+    // For dry run, validate inputs but don't create output
+    if dry_run {
+        if verbose {
+            eprintln!("Dry run: Validating inputs...");
+        }
+
+        // Validate that input files exist and are readable
+        if let Some(ref video_path) = video {
+            if !video_path.exists() {
+                anyhow::bail!("Video input file does not exist: {}", video_path.display());
+            }
+            if verbose {
+                eprintln!("✓ Video input: {}", video_path.display());
+            }
+        }
+
+        if let Some(ref audio_path) = audio {
+            if !audio_path.exists() {
+                anyhow::bail!("Audio input file does not exist: {}", audio_path.display());
+            }
+            if verbose {
+                eprintln!("✓ Audio input: {}", audio_path.display());
+            }
+        }
+
+        // Validate output path (basic check for dry run)
+        if output.exists() && !output.is_file() {
+            anyhow::bail!("Output path exists but is not a file: {}", output.display());
+        }
+
+        if json {
+            println!("{{\"dry_run\": true, \"valid\": true}}");
+        } else {
+            println!("✅ Dry run complete - inputs are valid!");
+            if let Some(ref video_path) = video {
+                println!("   Video input: {}", video_path.display());
+            }
+            if let Some(ref audio_path) = audio {
+                println!("   Audio input: {}", audio_path.display());
+            }
+            println!("   Output would be: {}", output.display());
+        }
+        return Ok(());
     }
 
     // Store paths for later use
