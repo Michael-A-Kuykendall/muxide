@@ -1,6 +1,6 @@
 [package]
 name = "muxide"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 rust-version = "1.74"
 description = "Zero-dependency pure-Rust MP4 muxer for recording applications. Includes CLI tool and library API."
