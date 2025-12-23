@@ -83,6 +83,12 @@ muxide info input.mp4
 
 The CLI tool accepts raw encoded frames from stdin or files and produces MP4 output.
 
+## 🦀 Used By CrabCamera
+
+Muxide powers **[CrabCamera](https://github.com/Michael-A-Kuykendall/crabcamera)** - the production-ready desktop camera plugin for Tauri applications. CrabCamera uses Muxide for reliable MP4 output with perfect A/V synchronization.
+
+> **Check out CrabCamera** if you need camera/audio recording in your Tauri app! It provides unified access to desktop cameras and microphones with professional controls.
+
 ## Core Invariant
 
 Muxide enforces a strict contract:

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.4
+
+- **Ecosystem Integration**: Added "Used By CrabCamera" section in README to highlight integration with the popular desktop camera plugin
+- **Cross-Promotion**: Enhanced documentation to showcase real-world usage in production applications
+
+## 0.1.3
+
+- **Validation Features**: Added comprehensive MP4 validation with `validate()` method and CLI command
+- **Error Recovery**: Enhanced error handling with detailed diagnostics and recovery suggestions
+- **CLI Enhancements**: Improved command-line interface with validation and info commands
+- **Production Polish**: Final optimizations and testing for production deployment
+
 ## 0.1.2
 
 - **CLI Tool**: Complete command-line interface with progress bars, JSON output, and comprehensive muxing options
