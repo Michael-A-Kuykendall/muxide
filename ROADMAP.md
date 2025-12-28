@@ -3,12 +3,13 @@
 Muxide is a zero-dependency, pure-Rust MP4 muxer.
 Its mission is **simple muxing done right**: encoded frames in, playable MP4 out.
 
-## Current Status: v0.1.1 - Advanced Features Complete ✅
+## Current Status: v0.1.4 - Production Integration Complete ✅
 
 ### Core Features (v0.1.0)
 - ✅ H.264/AVC video muxing (Annex B format)
 - ✅ H.265/HEVC video muxing with VPS/SPS/PPS extraction
 - ✅ AV1 video muxing (OBU format)
+- ✅ VP9 video muxing (complete - frame header parsing, resolution/bit-depth extraction)
 - ✅ AAC audio muxing (ADTS format)
 - ✅ Opus audio muxing (48kHz raw packets)
 - ✅ Fast-start layout (moov before mdat)
@@ -17,7 +18,7 @@ Its mission is **simple muxing done right**: encoded frames in, playable MP4 out
 - ✅ Property-based test suite
 - ✅ Published to crates.io
 
-### Advanced Features (v0.1.1)
+### Advanced Features (v0.1.1-0.1.4)
 - ✅ **Comprehensive AAC Support**: All profiles (LC, Main, SSR, LTP, HE, HEv2)
 - ✅ **World-Class Error Handling**: Detailed diagnostics, hex dumps, JSON output, actionable suggestions
 - ✅ **Metadata Support**: Creation time, language encoding (ISO 639-2/T)
@@ -28,27 +29,38 @@ Its mission is **simple muxing done right**: encoded frames in, playable MP4 out
 - ✅ **CI/CD Integration**: Fast unit tests on every commit, comprehensive property tests on PRs
 - ✅ **Real-World Examples**: Working demos with fixture data
 - ✅ **CLI Tool**: Command-line interface for immediate developer utility
+- ✅ **CrabCamera Integration**: Used by production camera plugin (26+ stars)
 
 ## Next Goals (v0.2.0) - Developer Experience & Performance
 
+### v0.1.5 (Q1 2026) - Release Hygiene & Alignment
+- [ ] **VP9 Feature Parity**: Ensure VP9 support is documented in README.md feature table (matches ROADMAP claim of "complete")
+- [ ] **Git Release Tags**: Add retroactive tags for v0.1.0 through v0.1.4 for better version tracking
+- [ ] **Dependency Clarity**: Update README.md to clarify "zero runtime dependencies" (no FFmpeg/C binaries, but Rust crates are used)
+- [ ] **Audit Alignment**: Address Muxide-specific findings from CODE_AUDIT_REPORT.md (e.g., API ergonomics) in v0.2.0 planning
+
 ### High Priority
-- [ ] **VP9 Video Codec**: Complement AV1 with VP9 support
-- [ ] **Performance Benchmarks**: Establish baseline performance metrics
+- [ ] **Performance Benchmarks**: Establish baseline performance metrics and optimization targets
+- [ ] **SIMD Optimizations**: Performance improvements for hot paths in frame processing
 
 ### Medium Priority
-- [ ] **SIMD Optimizations**: Performance improvements for hot paths
 - [ ] **Enhanced Documentation**: More real-world examples and tutorials
-- [ ] **Async I/O Support**: Optional tokio-based async operations
+- [ ] **Async I/O Support**: Optional tokio-based async operations for large file handling
+- [ ] **WebAssembly Target**: Browser-based MP4 muxing for web applications
 
 ### Lower Priority
-- [ ] **Chapter Markers**: Metadata support for navigation points
-- [ ] **Streaming Optimizations**: Further improvements for DASH/HLS
+- [ ] **Chapter Markers**: Metadata support for navigation points in long videos
+- [ ] **Streaming Optimizations**: Further improvements for DASH/HLS low-latency streaming
 
 ## Future Possibilities (v0.3.0+)
-- [ ] DASH manifest generation
-- [ ] Hardware-accelerated muxing
-- [ ] Plugin system for custom codecs
-- [ ] Advanced metadata formats (chapters, subtitles)
+- [ ] **Hardware-accelerated Muxing**: GPU-assisted frame processing and I/O
+- [ ] **Plugin System**: Extensible architecture for custom codecs and formats
+- [ ] **Advanced Metadata**: Chapters, subtitles, custom metadata formats
+- [ ] **DASH Manifest Generation**: Automatic streaming manifest creation
+- [ ] **Cloud Storage Integration**: Direct upload to S3, GCS, Azure Blob Storage
+- [ ] **Real-time Streaming**: RTMP/RTSP output for live broadcasting
+- [ ] **Container Extensions**: Support for MKV, AVI, MOV formats
+- [ ] **Analytics Export**: Performance metrics and usage statistics
 
 ## Non-Goals
 - **Encoding/decoding** - Muxide is a muxer only, bring your own codec
@@ -59,10 +71,11 @@ Its mission is **simple muxing done right**: encoded frames in, playable MP4 out
 ---
 
 ## Recent Achievements
-- **v0.1.1 Release**: Advanced AAC support, world-class error handling, metadata features
+- **v0.1.4 Release**: Production integration with CrabCamera camera plugin
 - **Codebase Cleanup**: Removed all external crate references, focused on Muxide's unique value
 - **Quality Assurance**: Comprehensive testing suite with real-world validation
 - **Developer Experience**: Detailed error messages that make debugging 10x faster
+- **Ecosystem Growth**: Adopted by production applications with 26+ GitHub stars
 
 ## Governance
 - **Lead Maintainer:** Michael A. Kuykendall

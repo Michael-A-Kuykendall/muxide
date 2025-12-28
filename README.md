@@ -83,12 +83,6 @@ muxide info input.mp4
 
 The CLI tool accepts raw encoded frames from stdin or files and produces MP4 output.
 
-## 🦀 Used By CrabCamera
-
-Muxide powers **[CrabCamera](https://github.com/Michael-A-Kuykendall/crabcamera)** - the production-ready desktop camera plugin for Tauri applications. CrabCamera uses Muxide for reliable MP4 output with perfect A/V synchronization.
-
-> **Check out CrabCamera** if you need camera/audio recording in your Tauri app! It provides unified access to desktop cameras and microphones with professional controls.
-
 ## Core Invariant
 
 Muxide enforces a strict contract:
@@ -111,6 +105,7 @@ If input violates the contract, Muxide **fails fast** with explicit errors—no 
 | **Video** | H.264/AVC | Annex B format |
 | | H.265/HEVC | Annex B with VPS/SPS/PPS |
 | | AV1 | OBU stream format |
+| | VP9 | Frame header parsing, resolution/bit-depth extraction |
 | **Audio** | AAC | All profiles: LC, Main, SSR, LTP, HE, HEv2 |
 | | Opus | Raw packets, 48kHz |
 | **Container** | Fast-start | `moov` before `mdat` for web playback |
@@ -296,7 +291,7 @@ Muxide is intentionally **focused**. It does **not**:
 Muxide is a great fit for:
 
 - 🎥 **Screen recorders** — capture → encode → mux → ship
-- 📹 **Camera apps** — webcam/IP camera recording pipelines
+- 📹 **Camera apps** — webcam/IP camera recording pipelines (e.g., CrabCamera integration)
 - 🎬 **Video editors** — export timeline to MP4
 - 📡 **Streaming** — generate fMP4 segments for DASH/HLS
 - 🏭 **Embedded systems** — single binary, no external deps
@@ -345,25 +340,7 @@ Muxide is designed for **minimal overhead**. Muxing should never be your bottlen
 | 1000 video + 1500 audio | 457 µs | 2.2M frames/sec |
 | 100 4K frames (~6.5 MB) | 14 ms | **464 MB/sec** |
 
-<details>
-<summary><strong>Run benchmarks yourself</strong></summary>
-
-```bash
-cargo bench
-```
-
-Benchmarks run on standard development hardware. In practice, **encoding is always the bottleneck** — muxing overhead is negligible.
-
-</details>
-
----
-
-## Input Format Requirements
-
-<details>
-<summary><strong>📋 Codec-specific requirements (click to expand)</strong></summary>
-
-### H.264/AVC
+> **Note:** Benchmarks are based on development hardware. Encoding is typically the bottleneck—muxing overhead is negligible. Run `cargo bench` for your environment (dev-only benchmarks available).AVC
 
 - **Format:** Annex B (start codes: `00 00 00 01` or `00 00 01`)
 - **First keyframe must contain:** SPS and PPS NAL units
