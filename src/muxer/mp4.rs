@@ -2617,8 +2617,9 @@ mod tests {
             // If the profile is not supported, it would panic in debug mode
             // In release mode, it would continue but we test that it doesn't fail due to profile
             let result = writer.write_audio_sample(0, &adts_frame);
-            // We expect either success or ADTS validation failure, but not profile-related failure
-            assert!(!matches!(result, Err(Mp4WriterError::InvalidAdtsDetailed(_)) if false));
+            // We expect either success or ADTS validation failure - both are acceptable outcomes
+            // for this test which is verifying profile handling, not ADTS parsing
+            assert!(result.is_ok() || matches!(result, Err(Mp4WriterError::InvalidAdtsDetailed(_))));
         }
     }
 

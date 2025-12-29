@@ -130,31 +130,111 @@ pub fn extract_vp9_config(keyframe: &[u8]) -> Option<Vp9Config> {
     );
 
     if show_existing_frame != 0 || frame_type != 0 {
-        return None;
+        return None; // Not a keyframe
     }
 
-    // For keyframes, we need to parse more of the header
-    // This is a simplified implementation - full VP9 header parsing is complex
-    // For now, we'll use placeholder values and focus on the basic structure
+    // For keyframes, parse the frame size from the uncompressed header
+    // VP9 uses variable-length unsigned integer encoding for frame dimensions
 
-    // TODO: Implement full VP9 header parsing for resolution extraction
-    // This requires parsing the uncompressed header which includes:
-    // - Frame size (width/height)
-    // - Render size (if different)
-    // - Color configuration
-    // - Loop filter parameters
-    // etc.
+    let mut offset = 4; // Start after the basic header byte
 
-    // Placeholder implementation - will be replaced with actual parsing
+    // Skip sync code if present (for certain profiles)
+    if profile >= 2 {
+        if offset + 1 >= keyframe.len() {
+            return None;
+        }
+        offset += 1; // Skip sync code byte
+    }
+
+    // Parse frame width (variable length unsigned int)
+    let (width, new_offset) = parse_vp9_var_uint(keyframe, offset)?;
+    offset = new_offset;
+
+    // Parse frame height (variable length unsigned int)
+    let (height, new_offset) = parse_vp9_var_uint(keyframe, offset)?;
+    offset = new_offset;
+
+    // Parse render size (optional, may differ from frame size)
+    let (render_width, render_height) = if offset + 1 < keyframe.len() {
+        let render_and_frame_size_different = (keyframe[offset] & 0x0C) != 0;
+        if render_and_frame_size_different {
+            offset += 1;
+            let (rw, no) = parse_vp9_var_uint(keyframe, offset)?;
+            offset = no;
+            let (rh, no) = parse_vp9_var_uint(keyframe, offset)?;
+            offset = no;
+            (rw, rh)
+        } else {
+            (width, height)
+        }
+    } else {
+        (width, height)
+    };
+
+    // Parse color configuration
+    let (bit_depth, color_space, transfer_function, matrix_coefficients) =
+        parse_vp9_color_config(keyframe, offset)?;
+
     Some(Vp9Config {
-        width: 1920,  // TODO: Parse from frame header
-        height: 1080, // TODO: Parse from frame header
+        width: render_width,
+        height: render_height,
         profile,
-        bit_depth: 8, // TODO: Parse from frame header
-        color_space: 0,
-        transfer_function: 0,
-        matrix_coefficients: 0,
+        bit_depth,
+        color_space,
+        transfer_function,
+        matrix_coefficients,
     })
+}
+
+/// Parse VP9 variable-length unsigned integer.
+/// Returns (value, new_offset) or None if parsing fails.
+fn parse_vp9_var_uint(data: &[u8], mut offset: usize) -> Option<(u32, usize)> {
+    let mut value = 0u32;
+    let mut shift = 0;
+
+    loop {
+        if offset >= data.len() {
+            return None;
+        }
+
+        let byte = data[offset];
+        offset += 1;
+
+        value |= ((byte & 0x7F) as u32) << shift;
+        shift += 7;
+
+        if (byte & 0x80) == 0 {
+            break;
+        }
+
+        if shift >= 32 {
+            return None; // Prevent overflow
+        }
+    }
+
+    Some((value, offset))
+}
+
+/// Parse VP9 color configuration from the frame header.
+/// Returns (bit_depth, color_space, transfer_function, matrix_coefficients)
+fn parse_vp9_color_config(data: &[u8], offset: usize) -> Option<(u8, u8, u8, u8)> {
+    if offset >= data.len() {
+        return Some((8, 0, 0, 0)); // Default values
+    }
+
+    // Parse bit depth
+    let bit_depth = if (data[offset] & 0x01) != 0 {
+        10
+    } else {
+        8
+    };
+
+    // Parse color space and transfer characteristics
+    let color_space = (data[offset] >> 1) & 0x07;
+    let transfer_function = (data[offset] >> 4) & 0x07;
+    let matrix_coefficients = (data[offset] >> 7) & 0x01;
+
+    Some((bit_depth, color_space, transfer_function, matrix_coefficients))
 }
 
 /// Validate that a buffer contains a valid VP9 frame.
