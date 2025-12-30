@@ -105,7 +105,7 @@ If input violates the contract, Muxide **fails fast** with explicit errors—no 
 | **Video** | H.264/AVC | Annex B format |
 | | H.265/HEVC | Annex B with VPS/SPS/PPS |
 | | AV1 | OBU stream format |
-| | VP9 | Frame header parsing, resolution/bit-depth extraction |
+| | VP9 | Frame header parsing, resolution/bit-depth/color config extraction |
 | **Audio** | AAC | All profiles: LC, Main, SSR, LTP, HE, HEv2 |
 | | Opus | Raw packets, 48kHz |
 | **Container** | Fast-start | `moov` before `mdat` for web playback |

@@ -241,6 +241,10 @@ pub struct MuxerBuilder<Writer> {
     metadata: Option<Metadata>,
     /// Whether to enable fast-start (moov before mdat).
     fast_start: bool,
+    /// SPS data for fragmented MP4.
+    sps: Option<Vec<u8>>,
+    /// PPS data for fragmented MP4.
+    pps: Option<Vec<u8>>,
 }
 
 impl<Writer> MuxerBuilder<Writer> {
@@ -252,6 +256,8 @@ impl<Writer> MuxerBuilder<Writer> {
             audio: None,
             metadata: None,
             fast_start: true, // Default ON for web compatibility
+            sps: None,
+            pps: None,
         }
     }
 
@@ -277,6 +283,20 @@ impl<Writer> MuxerBuilder<Writer> {
     /// Default is `true` for web streaming compatibility.
     pub fn with_fast_start(mut self, enabled: bool) -> Self {
         self.fast_start = enabled;
+        self
+    }
+
+    /// Set SPS (Sequence Parameter Set) data for H.264/H.265 fragmented MP4.
+    /// Required for proper fragmented MP4 initialization.
+    pub fn with_sps(mut self, sps: Vec<u8>) -> Self {
+        self.sps = Some(sps);
+        self
+    }
+
+    /// Set PPS (Picture Parameter Set) data for H.264/H.265 fragmented MP4.
+    /// Required for proper fragmented MP4 initialization.
+    pub fn with_pps(mut self, pps: Vec<u8>) -> Self {
+        self.pps = Some(pps);
         self
     }
 
@@ -373,22 +393,36 @@ impl<Writer> MuxerBuilder<Writer> {
 
     /// Create a fragmented MP4 muxer.
     ///
-    /// This is a convenience method that creates a `FragmentedMuxer` with
-    /// the configuration from this builder. Only video configuration is
-    /// supported for fragmented MP4 in the initial implementation.
+    /// This creates a `FragmentedMuxer` with the configuration from this builder.
+    /// For H.264/H.265, SPS and PPS must be provided using `with_sps()` and `with_pps()`.
+    /// Only video configuration is supported for fragmented MP4.
     ///
     /// # Errors
     ///
-    /// Returns an error if video configuration is missing.
+    /// Returns an error if video configuration is missing or SPS/PPS are not provided for H.264/H.265.
     pub fn new_with_fragment(self) -> Result<FragmentedMuxer, MuxerError> {
         // Fragmented MP4 requires video configuration
-        let (_codec, width, height, _framerate) =
+        let (codec, width, height, _framerate) =
             self.video.ok_or(MuxerError::MissingVideoConfig)?;
 
-        // Extract SPS/PPS from video codec config (simplified for now)
-        // In a real implementation, this would parse the codec config
-        let sps = vec![0x67, 0x42, 0x00, 0x0a, 0xf8, 0x41, 0xa2]; // Example SPS
-        let pps = vec![0x68, 0xce, 0x38, 0x80]; // Example PPS
+        let (sps, pps) = match codec {
+            VideoCodec::H264 | VideoCodec::H265 => {
+                let sps = self.sps.ok_or_else(|| MuxerError::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "SPS must be provided for H.264/H.265 fragmented MP4 using with_sps()",
+                )))?;
+                let pps = self.pps.ok_or_else(|| MuxerError::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "PPS must be provided for H.264/H.265 fragmented MP4 using with_pps()",
+                )))?;
+                (sps, pps)
+            }
+            VideoCodec::Av1 | VideoCodec::Vp9 => {
+                // For AV1/VP9, SPS/PPS are not used in the same way
+                // Use empty defaults for now
+                (vec![], vec![])
+            }
+        };
 
         let config = FragmentConfig {
             width,
@@ -612,46 +646,6 @@ impl std::error::Error for MuxerError {}
 // returning errors.  These stubs ensure that the API compiles and can be
 // used by downstream code while implementation proceeds in later slices.
 impl<Writer: Write> Muxer<Writer> {
-    /// Convenience constructor for config-driven integrations.
-    pub fn new(writer: Writer, config: MuxerConfig) -> Result<Self, MuxerError> {
-        let mut builder = MuxerBuilder::new(writer).video(
-            VideoCodec::H264,
-            config.width,
-            config.height,
-            config.framerate,
-        );
-        if let Some(audio) = config.audio {
-            builder = builder.audio(audio.codec, audio.sample_rate, audio.channels);
-        }
-        let mut muxer = builder.build()?;
-        muxer.metadata = config.metadata;
-        muxer.fast_start = config.fast_start;
-        Ok(muxer)
-    }
-
-    /// Simple constructor for quick setup.
-    pub fn simple(
-        writer: Writer,
-        width: u32,
-        height: u32,
-        video_codec: VideoCodec,
-        audio_codec: Option<AudioCodec>,
-        sample_rate: Option<u32>,
-        channels: Option<u16>,
-    ) -> Result<Self, MuxerError>
-    where
-        Writer: Write,
-    {
-        let mut builder = MuxerBuilder::new(writer).video(video_codec, width, height, 30.0); // Default 30fps
-        if let Some(codec) = audio_codec {
-            if codec != AudioCodec::None {
-                let rate = sample_rate.unwrap_or(48000);
-                let ch = channels.unwrap_or(2);
-                builder = builder.audio(codec, rate, ch);
-            }
-        }
-        builder.build()
-    }
 
     /// Write a video frame to the container.
     ///
@@ -909,15 +903,6 @@ impl<Writer: Write> Muxer<Writer> {
             VideoCodec::H264 => {
                 // Check for IDR NAL (type 5)
                 let has_idr = AnnexBNalIter::new(data).any(|nal| (nal[0] & 0x1f) == 5);
-
-                // INV-101: H.264 keyframe detection must find valid NAL structure
-                // TODO: This invariant needs to be redesigned - it currently fails for valid P-frames
-                // assert_invariant!(
-                //     has_idr || !AnnexBNalIter::new(data).any(|_| true),
-                //     "H.264 keyframe detection requires valid NAL structure",
-                //     "api::is_keyframe::h264"
-                // );
-
                 has_idr
             }
             VideoCodec::H265 => {
@@ -926,15 +911,6 @@ impl<Writer: Write> Muxer<Writer> {
                     let nal_type = (nal[0] >> 1) & 0x3f;
                     (19..=21).contains(&nal_type)
                 });
-
-                // INV-102: H.265 keyframe detection must find valid NAL structure
-                // TODO: This invariant needs to be redesigned - it currently fails for valid P-frames
-                // assert_invariant!(
-                //     has_idr || !AnnexBNalIter::new(data).any(|_| true),
-                //     "H.265 keyframe detection requires valid NAL structure",
-                //     "api::is_keyframe::h265"
-                // );
-
                 has_idr
             }
             VideoCodec::Av1 => {
@@ -1046,15 +1022,10 @@ mod thread_safety_tests {
     #[test]
     fn simple_api_works() -> Result<(), MuxerError> {
         let mut buffer = Vec::new();
-        let mut muxer = Muxer::simple(
-            &mut buffer,
-            1920,
-            1080,
-            VideoCodec::H264,
-            Some(AudioCodec::Aac(AacProfile::Lc)),
-            Some(48000),
-            Some(2),
-        )?;
+        let mut muxer = MuxerBuilder::new(&mut buffer)
+            .video(VideoCodec::H264, 1920, 1080, 30.0)
+            .audio(AudioCodec::Aac(AacProfile::Lc), 48000, 2)
+            .build()?;
 
         // Test video encoding with a valid keyframe
         let video_data = make_h264_keyframe();

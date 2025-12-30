@@ -1,13 +1,17 @@
 //! Test the new API methods
 
 use muxide::api::{MuxerBuilder, VideoCodec};
+use muxide::codec::h264::default_avc_config;
 use muxide::fragmented::FragmentedMuxer;
 
 #[test]
 fn test_new_with_fragment_creates_fragmented_muxer() {
     let writer: Vec<u8> = Vec::new();
+    let config = default_avc_config();
     let result = MuxerBuilder::new(writer)
         .video(VideoCodec::H264, 1920, 1080, 30.0)
+        .with_sps(config.sps)
+        .with_pps(config.pps)
         .new_with_fragment();
 
     assert!(result.is_ok());

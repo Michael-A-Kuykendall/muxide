@@ -29,13 +29,14 @@
 //! # Example
 //!
 //! ```no_run
-//! use muxide::api::{Muxer, MuxerConfig};
+//! use muxide::api::{MuxerBuilder, VideoCodec};
 //! use std::fs::File;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let file = File::create("out.mp4")?;
-//! let config = MuxerConfig::new(1920, 1080, 30.0);
-//! let mut muxer = Muxer::new(file, config)?;
+//! let mut muxer = MuxerBuilder::new(file)
+//!     .video(VideoCodec::H264, 1920, 1080, 30.0)
+//!     .build()?;
 //!
 //! // Write frames (encoded elsewhere).
 //! // muxer.write_video(pts_secs, annex_b_bytes, is_keyframe)?;

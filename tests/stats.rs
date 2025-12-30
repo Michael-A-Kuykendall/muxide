@@ -1,6 +1,6 @@
 mod support;
 
-use muxide::api::{Muxer, MuxerBuilder, MuxerConfig, MuxerStats, VideoCodec};
+use muxide::api::{MuxerBuilder, MuxerConfig, MuxerStats, VideoCodec};
 use std::{fs, path::Path};
 use support::SharedBuffer;
 
@@ -50,13 +50,14 @@ fn finish_with_stats_reports_frames_duration_and_bytes() -> Result<(), Box<dyn s
 }
 
 #[test]
-fn muxer_new_from_config_is_equivalent_to_builder_for_video_only(
-) -> Result<(), Box<dyn std::error::Error>> {
+fn muxer_builder_creates_muxer_for_video_only() -> Result<(), Box<dyn std::error::Error>> {
     let frame0 = read_hex_fixture("frame0_key.264");
 
     let (writer, buffer) = SharedBuffer::new();
     let config = MuxerConfig::new(640, 480, 30.0);
-    let mut muxer: Muxer<_> = Muxer::new(writer, config)?;
+    let mut muxer = MuxerBuilder::new(writer)
+        .video(VideoCodec::H264, config.width, config.height, config.framerate)
+        .build()?;
 
     muxer.write_video(0.0, &frame0, true)?;
     let _stats = muxer.finish_with_stats()?;

@@ -34,7 +34,7 @@ Its mission is **simple muxing done right**: encoded frames in, playable MP4 out
 ## Next Goals (v0.2.0) - Developer Experience & Performance
 
 ### v0.1.5 (Q1 2026) - Release Hygiene & Alignment
-- [ ] **VP9 Feature Parity**: Ensure VP9 support is documented in README.md feature table (matches ROADMAP claim of "complete")
+- [x] **VP9 Feature Parity**: Ensure VP9 support is documented in README.md feature table (matches ROADMAP claim of "complete")
 - [ ] **Git Release Tags**: Add retroactive tags for v0.1.0 through v0.1.4 for better version tracking
 - [ ] **Dependency Clarity**: Update README.md to clarify "zero runtime dependencies" (no FFmpeg/C binaries, but Rust crates are used)
 - [ ] **Audit Alignment**: Address Muxide-specific findings from CODE_AUDIT_REPORT.md (e.g., API ergonomics) in v0.2.0 planning
