@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.5 (December 29, 2025) - Quality & Completeness
+## 0.1.5 (December 30, 2025) - Quality & Completeness
 
 ### 🎯 **VP9 Production Readiness**
 - **Full-Range Support**: Implemented proper parsing of VP9 color configuration full-range flags, ensuring accurate vpcC boxes for all VP9 streams
