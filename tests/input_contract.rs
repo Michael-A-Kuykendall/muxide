@@ -65,6 +65,49 @@ fn video_pts_negative_is_rejected() {
 }
 
 #[test]
+fn video_pts_nan_inf_is_rejected() {
+    let frame = read_hex_fixture("video_samples", "frame0_key.264");
+
+    // Test NaN
+    let (writer, _) = SharedBuffer::new();
+    let mut muxer = MuxerBuilder::new(writer)
+        .video(VideoCodec::H264, 640, 480, 30.0)
+        .build()
+        .unwrap();
+    let err = muxer.write_video(f64::NAN, &frame, true).unwrap_err();
+    assert!(
+        matches!(err, MuxerError::InvalidVideoPts { pts, frame_index }
+        if pts.is_nan() && frame_index == 0)
+    );
+
+    // Test positive infinity
+    let (writer, _) = SharedBuffer::new();
+    let mut muxer = MuxerBuilder::new(writer)
+        .video(VideoCodec::H264, 640, 480, 30.0)
+        .build()
+        .unwrap();
+    let err = muxer.write_video(f64::INFINITY, &frame, true).unwrap_err();
+    assert!(
+        matches!(err, MuxerError::InvalidVideoPts { pts, frame_index }
+        if pts.is_infinite() && pts > 0.0 && frame_index == 0)
+    );
+
+    // Test negative infinity
+    let (writer, _) = SharedBuffer::new();
+    let mut muxer = MuxerBuilder::new(writer)
+        .video(VideoCodec::H264, 640, 480, 30.0)
+        .build()
+        .unwrap();
+    let err = muxer
+        .write_video(f64::NEG_INFINITY, &frame, true)
+        .unwrap_err();
+    assert!(
+        matches!(err, MuxerError::InvalidVideoPts { pts, frame_index }
+        if pts.is_infinite() && pts < 0.0 && frame_index == 0)
+    );
+}
+
+#[test]
 fn video_pts_non_increasing_is_rejected() {
     let frame = read_hex_fixture("video_samples", "frame0_key.264");
     let (writer, _) = SharedBuffer::new();
@@ -171,8 +214,55 @@ fn dts_negative_is_rejected() {
         .write_video_with_dts(0.0, -0.001, &frame, true)
         .unwrap_err();
 
-    // Negative DTS treated as negative PTS error
-    assert!(matches!(err, MuxerError::NegativeVideoPts { .. }));
+    // Negative DTS treated as negative DTS error
+    assert!(matches!(err, MuxerError::NegativeVideoDts { .. }));
+}
+
+#[test]
+fn dts_nan_inf_is_rejected() {
+    let frame = read_hex_fixture("video_samples", "frame0_key.264");
+
+    // Test NaN
+    let (writer, _) = SharedBuffer::new();
+    let mut muxer = MuxerBuilder::new(writer)
+        .video(VideoCodec::H264, 640, 480, 30.0)
+        .build()
+        .unwrap();
+    let err = muxer
+        .write_video_with_dts(0.0, f64::NAN, &frame, true)
+        .unwrap_err();
+    assert!(
+        matches!(err, MuxerError::InvalidVideoDts { dts, frame_index }
+        if dts.is_nan() && frame_index == 0)
+    );
+
+    // Test positive infinity
+    let (writer, _) = SharedBuffer::new();
+    let mut muxer = MuxerBuilder::new(writer)
+        .video(VideoCodec::H264, 640, 480, 30.0)
+        .build()
+        .unwrap();
+    let err = muxer
+        .write_video_with_dts(0.0, f64::INFINITY, &frame, true)
+        .unwrap_err();
+    assert!(
+        matches!(err, MuxerError::InvalidVideoDts { dts, frame_index }
+        if dts.is_infinite() && dts > 0.0 && frame_index == 0)
+    );
+
+    // Test negative infinity
+    let (writer, _) = SharedBuffer::new();
+    let mut muxer = MuxerBuilder::new(writer)
+        .video(VideoCodec::H264, 640, 480, 30.0)
+        .build()
+        .unwrap();
+    let err = muxer
+        .write_video_with_dts(0.0, f64::NEG_INFINITY, &frame, true)
+        .unwrap_err();
+    assert!(
+        matches!(err, MuxerError::InvalidVideoDts { dts, frame_index }
+        if dts.is_infinite() && dts < 0.0 && frame_index == 0)
+    );
 }
 
 // =============================================================================
@@ -196,6 +286,59 @@ fn audio_pts_negative_is_rejected() {
     assert!(
         matches!(err, MuxerError::NegativeAudioPts { pts, frame_index }
         if pts < 0.0 && frame_index == 0)
+    );
+}
+
+#[test]
+fn audio_pts_nan_inf_is_rejected() {
+    let frame = read_hex_fixture("video_samples", "frame0_key.264");
+
+    // Test NaN
+    let (writer, _) = SharedBuffer::new();
+    let mut muxer = MuxerBuilder::new(writer)
+        .video(VideoCodec::H264, 640, 480, 30.0)
+        .audio(AudioCodec::Aac(AacProfile::Lc), 48000, 2)
+        .build()
+        .unwrap();
+    muxer.write_video(0.0, &frame, true).unwrap();
+    let err = muxer
+        .write_audio(f64::NAN, &valid_adts_frame())
+        .unwrap_err();
+    assert!(
+        matches!(err, MuxerError::InvalidAudioPts { pts, frame_index }
+        if pts.is_nan() && frame_index == 0)
+    );
+
+    // Test positive infinity
+    let (writer, _) = SharedBuffer::new();
+    let mut muxer = MuxerBuilder::new(writer)
+        .video(VideoCodec::H264, 640, 480, 30.0)
+        .audio(AudioCodec::Aac(AacProfile::Lc), 48000, 2)
+        .build()
+        .unwrap();
+    muxer.write_video(0.0, &frame, true).unwrap();
+    let err = muxer
+        .write_audio(f64::INFINITY, &valid_adts_frame())
+        .unwrap_err();
+    assert!(
+        matches!(err, MuxerError::InvalidAudioPts { pts, frame_index }
+        if pts.is_infinite() && pts > 0.0 && frame_index == 0)
+    );
+
+    // Test negative infinity
+    let (writer, _) = SharedBuffer::new();
+    let mut muxer = MuxerBuilder::new(writer)
+        .video(VideoCodec::H264, 640, 480, 30.0)
+        .audio(AudioCodec::Aac(AacProfile::Lc), 48000, 2)
+        .build()
+        .unwrap();
+    muxer.write_video(0.0, &frame, true).unwrap();
+    let err = muxer
+        .write_audio(f64::NEG_INFINITY, &valid_adts_frame())
+        .unwrap_err();
+    assert!(
+        matches!(err, MuxerError::InvalidAudioPts { pts, frame_index }
+        if pts.is_infinite() && pts < 0.0 && frame_index == 0)
     );
 }
 

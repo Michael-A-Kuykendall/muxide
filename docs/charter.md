@@ -7,7 +7,7 @@ This document started as a “freeze the slice ladder” charter. The crate has 
 Deliver a **recording‑oriented MP4 writer** in pure Rust that:
 
 1. Provides a **simple API**: *just give me encoded frames and timestamps; I will write an MP4 file*.
-2. Supports **H.264/H.265/AV1 video** and optional **AAC/Opus audio**.
+2. Supports **H.264/H.265/AV1/VP9 video** and optional **AAC/Opus audio**.
 3. Enforces **monotonic timestamps**, fails fast on invalid inputs, and supports B-frames when callers provide explicit PTS/DTS.
 4. Produces files that play correctly in major players (QuickTime, VLC, Windows Movies & TV, Chromium) without requiring external tools.
 5. Adheres to the **Slice‑Gated Engineering Doctrine**: work is delivered in small, verifiable slices with objective gates, and no refactoring or extra features are introduced until v0.1.0 is complete.

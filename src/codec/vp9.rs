@@ -23,6 +23,10 @@ pub struct Vp9Config {
     pub transfer_function: u8,
     /// Matrix coefficients.
     pub matrix_coefficients: u8,
+    /// VP9 level (0-255, typically 0 for most content).
+    pub level: u8,
+    /// Video full range flag (0 = limited range, 1 = full range).
+    pub full_range_flag: u8,
 }
 
 /// Errors that can occur during VP9 parsing.
@@ -130,31 +134,128 @@ pub fn extract_vp9_config(keyframe: &[u8]) -> Option<Vp9Config> {
     );
 
     if show_existing_frame != 0 || frame_type != 0 {
-        return None;
+        return None; // Not a keyframe
     }
 
-    // For keyframes, we need to parse more of the header
-    // This is a simplified implementation - full VP9 header parsing is complex
-    // For now, we'll use placeholder values and focus on the basic structure
+    // For keyframes, parse the frame size from the uncompressed header
+    // VP9 uses variable-length unsigned integer encoding for frame dimensions
 
-    // TODO: Implement full VP9 header parsing for resolution extraction
-    // This requires parsing the uncompressed header which includes:
-    // - Frame size (width/height)
-    // - Render size (if different)
-    // - Color configuration
-    // - Loop filter parameters
-    // etc.
+    let mut offset = 5; // Start after the frame header bytes
 
-    // Placeholder implementation - will be replaced with actual parsing
+    // Skip sync code if present (for certain profiles)
+    if profile >= 2 {
+        if offset + 1 >= keyframe.len() {
+            return None;
+        }
+        offset += 1; // Skip sync code byte
+    }
+
+    // Parse frame width (variable length unsigned int)
+    let (width, new_offset) = parse_vp9_var_uint(keyframe, offset)?;
+    offset = new_offset;
+
+    // Parse frame height (variable length unsigned int)
+    let (height, new_offset) = parse_vp9_var_uint(keyframe, offset)?;
+    offset = new_offset;
+
+    // Parse render size (optional, may differ from frame size)
+    let (render_width, render_height) = if offset + 1 < keyframe.len() {
+        let render_and_frame_size_different = (keyframe[offset] & 0x0C) != 0;
+        if render_and_frame_size_different {
+            offset += 1;
+            let (rw, no) = parse_vp9_var_uint(keyframe, offset)?;
+            offset = no;
+            let (rh, no) = parse_vp9_var_uint(keyframe, offset)?;
+            offset = no;
+            (rw, rh)
+        } else {
+            (width, height)
+        }
+    } else {
+        (width, height)
+    };
+
+    // Parse color configuration
+    let (bit_depth, color_space, transfer_function, matrix_coefficients, full_range_flag) =
+        parse_vp9_color_config(keyframe, offset)?;
+
     Some(Vp9Config {
-        width: 1920,  // TODO: Parse from frame header
-        height: 1080, // TODO: Parse from frame header
+        width: render_width,
+        height: render_height,
         profile,
-        bit_depth: 8, // TODO: Parse from frame header
-        color_space: 0,
-        transfer_function: 0,
-        matrix_coefficients: 0,
+        bit_depth,
+        color_space,
+        transfer_function,
+        matrix_coefficients,
+        level: 0, // VP9 level is typically 0
+        full_range_flag,
     })
+}
+
+/// Parse VP9 variable-length unsigned integer.
+/// Returns (value, new_offset) or None if parsing fails.
+fn parse_vp9_var_uint(data: &[u8], mut offset: usize) -> Option<(u32, usize)> {
+    let mut value = 0u32;
+    let mut shift = 0;
+
+    loop {
+        if offset >= data.len() {
+            return None;
+        }
+
+        let byte = data[offset];
+        offset += 1;
+
+        value |= ((byte & 0x7F) as u32) << shift;
+        shift += 7;
+
+        if (byte & 0x80) == 0 {
+            break;
+        }
+
+        if shift >= 32 {
+            return None; // Prevent overflow
+        }
+    }
+
+    Some((value, offset))
+}
+
+/// Parse VP9 color configuration from the frame header.
+/// Returns (bit_depth, color_space, transfer_function, matrix_coefficients, full_range_flag)
+fn parse_vp9_color_config(data: &[u8], mut offset: usize) -> Option<(u8, u8, u8, u8, u8)> {
+    if offset >= data.len() {
+        return Some((8, 0, 0, 0, 0)); // Default values
+    }
+
+    // Parse bit depth
+    let bit_depth = if (data[offset] & 0x01) != 0 { 10 } else { 8 };
+
+    // Parse color space and transfer characteristics
+    let color_space = (data[offset] >> 1) & 0x07;
+    let transfer_function = (data[offset] >> 4) & 0x07;
+    let matrix_coefficients = (data[offset] >> 7) & 0x01;
+
+    offset += 1;
+
+    // If color_space != 0, parse additional color config including full_range
+    let full_range_flag = if color_space != 0 {
+        if offset >= data.len() {
+            0 // Default to limited range if data missing
+        } else {
+            data[offset] & 0x01
+        }
+    } else {
+        0 // Limited range for monochrome
+    };
+
+    Some((
+        bit_depth,
+        color_space,
+        transfer_function,
+        matrix_coefficients,
+        full_range_flag,
+    ))
 }
 
 /// Validate that a buffer contains a valid VP9 frame.
@@ -197,5 +298,109 @@ mod tests {
     fn test_valid_frame_marker() {
         let valid_frame = [0x49, 0x83, 0x42, 0x00, 0x00, 0x00];
         assert!(is_valid_vp9_frame(&valid_frame));
+    }
+
+    #[test]
+    fn test_is_vp9_keyframe_valid() {
+        // Valid keyframe: profile=0, show_existing_frame=0, frame_type=0
+        let keyframe = [0x49, 0x83, 0x42, 0x00, 0x00, 0x00];
+        assert_eq!(is_vp9_keyframe(&keyframe), Ok(true));
+    }
+
+    #[test]
+    fn test_is_vp9_keyframe_pframe() {
+        // P-frame: profile=0, show_existing_frame=0, frame_type=1
+        let pframe = [0x49, 0x83, 0x42, 0x10, 0x00, 0x00];
+        assert_eq!(is_vp9_keyframe(&pframe), Ok(false));
+    }
+
+    #[test]
+    fn test_is_vp9_keyframe_show_existing() {
+        // Show existing frame: profile=0, show_existing_frame=1, frame_type=0
+        let show_existing = [0x49, 0x83, 0x42, 0x20, 0x00, 0x00];
+        assert_eq!(is_vp9_keyframe(&show_existing), Ok(false));
+    }
+
+    #[test]
+    fn test_extract_vp9_config_valid() {
+        // Minimal valid VP9 keyframe with config
+        let keyframe = vec![
+            0x49, 0x83, 0x42, // frame marker
+            0x00, // profile=0, show_existing=0, frame_type=0
+            0x00, // byte 4 (possibly part of header)
+            0x80, 0x02, // width = 256 (var_uint: starts at offset 5)
+            0x80, 0x02, // height = 256 (var_uint)
+            0x00, // render size same as frame size
+            0x00, // color config (8-bit, color_space=0)
+        ];
+        let config = extract_vp9_config(&keyframe);
+        assert!(config.is_some());
+        let config = config.unwrap();
+        assert_eq!(config.width, 256);
+        assert_eq!(config.height, 256);
+        assert_eq!(config.profile, 0);
+        assert_eq!(config.bit_depth, 8);
+        assert_eq!(config.level, 0);
+        assert_eq!(config.full_range_flag, 0);
+    }
+
+    #[test]
+    fn test_extract_vp9_config_invalid_marker() {
+        let invalid_frame = [0x00, 0x00, 0x00, 0x00];
+        assert!(extract_vp9_config(&invalid_frame).is_none());
+    }
+
+    #[test]
+    fn test_extract_vp9_config_pframe() {
+        // P-frame should not extract config
+        let pframe = [0x49, 0x83, 0x42, 0x10, 0x00, 0x00];
+        assert!(extract_vp9_config(&pframe).is_none());
+    }
+
+    #[test]
+    fn test_parse_vp9_var_uint() {
+        // Test parsing variable-length unsigned integers
+        let data = [0x7F, 0x80, 0x01, 0x80, 0x80, 0x01];
+
+        // Single byte: 0x7F = 127
+        assert_eq!(parse_vp9_var_uint(&data, 0), Some((127, 1)));
+
+        // Two bytes: 0x80 0x01 = 128
+        assert_eq!(parse_vp9_var_uint(&data, 1), Some((128, 3)));
+
+        // Three bytes: 0x80 0x80 0x01 = 16384
+        assert_eq!(parse_vp9_var_uint(&data, 3), Some((16384, 6)));
+    }
+
+    #[test]
+    fn test_parse_vp9_var_uint_overflow() {
+        // Test overflow prevention (more than 5 bytes would overflow u32)
+        let data = [0x80, 0x80, 0x80, 0x80, 0x80, 0x80]; // 6 continuation bytes
+        assert_eq!(parse_vp9_var_uint(&data, 0), None);
+    }
+
+    #[test]
+    fn test_parse_vp9_color_config() {
+        let data = [0x00]; // 8-bit, color_space=0, transfer=0, matrix=0
+        assert_eq!(parse_vp9_color_config(&data, 0), Some((8, 0, 0, 0, 0)));
+
+        let data_10bit = [0x01]; // 10-bit
+        assert_eq!(
+            parse_vp9_color_config(&data_10bit, 0),
+            Some((10, 0, 0, 0, 0))
+        );
+
+        let data_color = [0x12]; // 8-bit, color_space=1, transfer=1, matrix=0
+        assert_eq!(
+            parse_vp9_color_config(&data_color, 0),
+            Some((8, 1, 1, 0, 0))
+        );
+    }
+
+    #[test]
+    fn test_parse_vp9_color_config_empty() {
+        let data = [];
+        // Should return defaults when offset is out of bounds
+        assert_eq!(parse_vp9_color_config(&data, 0), Some((8, 0, 0, 0, 0)));
     }
 }

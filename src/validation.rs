@@ -8,8 +8,8 @@ use crate::api::{AudioCodec, VideoCodec};
 use crate::codec::av1::is_av1_keyframe;
 use crate::codec::h264::is_h264_keyframe;
 use crate::codec::h265::is_hevc_keyframe;
-use crate::codec::vp9::is_vp9_keyframe;
 use crate::codec::opus::is_valid_opus_packet;
+use crate::codec::vp9::is_vp9_keyframe;
 
 /// Result of input validation.
 #[derive(Debug, Clone, PartialEq)]
@@ -53,6 +53,25 @@ impl ValidationResult {
         self.is_valid = false;
         self
     }
+}
+
+/// Configuration for video validation.
+#[derive(Debug, Clone)]
+pub struct VideoValidationConfig {
+    pub codec: Option<VideoCodec>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub framerate: Option<f64>,
+    pub sample_frame: Option<(Vec<u8>, bool)>,
+}
+
+/// Configuration for audio validation.
+#[derive(Debug, Clone)]
+pub struct AudioValidationConfig {
+    pub codec: Option<AudioCodec>,
+    pub sample_rate: Option<u32>,
+    pub channels: Option<u8>,
+    pub sample_frame: Option<Vec<u8>>,
 }
 
 /// Validate video codec parameters for muxing.
@@ -156,7 +175,11 @@ pub fn validate_audio_config(
 ///
 /// Checks that the frame data is properly formatted and contains
 /// necessary headers for the specified codec.
-pub fn validate_video_frame(codec: VideoCodec, frame_data: &[u8], is_keyframe: bool) -> ValidationResult {
+pub fn validate_video_frame(
+    codec: VideoCodec,
+    frame_data: &[u8],
+    is_keyframe: bool,
+) -> ValidationResult {
     let mut result = ValidationResult::valid();
 
     if frame_data.is_empty() {
@@ -230,56 +253,64 @@ pub fn validate_audio_frame(codec: AudioCodec, frame_data: &[u8]) -> ValidationR
 /// Validates all parameters and performs basic checks on sample frames
 /// to ensure they can be successfully muxed.
 pub fn validate_muxing_config(
-    video_codec: Option<VideoCodec>,
-    width: Option<u32>,
-    height: Option<u32>,
-    framerate: Option<f64>,
-    audio_codec: Option<AudioCodec>,
-    sample_rate: Option<u32>,
-    channels: Option<u8>,
-    sample_video_frame: Option<(&[u8], bool)>,
-    sample_audio_frame: Option<&[u8]>,
+    video_config: VideoValidationConfig,
+    audio_config: AudioValidationConfig,
 ) -> ValidationResult {
     let mut result = ValidationResult::valid();
 
     // Validate video config if provided
-    if let (Some(vc), Some(w), Some(h), Some(fps)) = (video_codec, width, height, framerate) {
+    if let (Some(vc), Some(w), Some(h), Some(fps)) = (
+        video_config.codec,
+        video_config.width,
+        video_config.height,
+        video_config.framerate,
+    ) {
         let video_result = validate_video_config(vc, w, h, fps);
         result.is_valid &= video_result.is_valid;
         result.messages.extend(video_result.messages);
         result.errors.extend(video_result.errors);
-    } else if video_codec.is_some() {
-        result = result.with_error("Video codec specified but missing width, height, or framerate".to_string());
+
+        // Validate sample video frame if provided
+        if let Some((frame_data, is_keyframe)) = &video_config.sample_frame {
+            let frame_result = validate_video_frame(vc, frame_data, *is_keyframe);
+            result.is_valid &= frame_result.is_valid;
+            result.messages.extend(frame_result.messages);
+            result.errors.extend(frame_result.errors);
+        }
+    } else if video_config.codec.is_some() {
+        result = result.with_error(
+            "Video codec specified but missing width, height, or framerate".to_string(),
+        );
     }
 
     // Validate audio config if provided
-    if let (Some(ac), Some(sr), Some(ch)) = (audio_codec, sample_rate, channels) {
+    if let (Some(ac), Some(sr), Some(ch)) = (
+        audio_config.codec,
+        audio_config.sample_rate,
+        audio_config.channels,
+    ) {
         let audio_result = validate_audio_config(ac, sr, ch);
         result.is_valid &= audio_result.is_valid;
         result.messages.extend(audio_result.messages);
         result.errors.extend(audio_result.errors);
-    } else if audio_codec.is_some() && audio_codec != Some(AudioCodec::None) {
-        result = result.with_error("Audio codec specified but missing sample rate or channels".to_string());
+
+        // Validate sample audio frame if provided
+        if let Some(frame_data) = &audio_config.sample_frame {
+            let frame_result = validate_audio_frame(ac, frame_data);
+            result.is_valid &= frame_result.is_valid;
+            result.messages.extend(frame_result.messages);
+            result.errors.extend(frame_result.errors);
+        }
+    } else if audio_config.codec.is_some() && audio_config.codec != Some(AudioCodec::None) {
+        result = result
+            .with_error("Audio codec specified but missing sample rate or channels".to_string());
     }
 
     // Require at least one media stream
-    if video_codec.is_none() && (audio_codec.is_none() || audio_codec == Some(AudioCodec::None)) {
+    if video_config.codec.is_none()
+        && (audio_config.codec.is_none() || audio_config.codec == Some(AudioCodec::None))
+    {
         result = result.with_error("At least one of video or audio must be configured".to_string());
-    }
-
-    // Validate sample frames if provided
-    if let (Some(vc), Some((frame_data, is_keyframe))) = (video_codec, sample_video_frame) {
-        let frame_result = validate_video_frame(vc, frame_data, is_keyframe);
-        result.is_valid &= frame_result.is_valid;
-        result.messages.extend(frame_result.messages);
-        result.errors.extend(frame_result.errors);
-    }
-
-    if let (Some(ac), Some(frame_data)) = (audio_codec, sample_audio_frame) {
-        let frame_result = validate_audio_frame(ac, frame_data);
-        result.is_valid &= frame_result.is_valid;
-        result.messages.extend(frame_result.messages);
-        result.errors.extend(frame_result.errors);
     }
 
     result
@@ -302,7 +333,7 @@ mod tests {
     fn test_validate_video_config_invalid_dimensions() {
         let result = validate_video_config(VideoCodec::H264, 0, 1080, 30.0);
         assert!(!result.is_valid);
-        assert!(result.errors.len() > 0);
+        assert!(!result.errors.is_empty());
     }
 
     #[test]
@@ -314,17 +345,20 @@ mod tests {
 
     #[test]
     fn test_validate_muxing_config_minimal() {
-        let result = validate_muxing_config(
-            Some(VideoCodec::H264),
-            Some(1920),
-            Some(1080),
-            Some(30.0),
-            None,
-            None,
-            None,
-            None,
-            None,
-        );
+        let video_config = VideoValidationConfig {
+            codec: Some(VideoCodec::H264),
+            width: Some(1920),
+            height: Some(1080),
+            framerate: Some(30.0),
+            sample_frame: None,
+        };
+        let audio_config = AudioValidationConfig {
+            codec: None,
+            sample_rate: None,
+            channels: None,
+            sample_frame: None,
+        };
+        let result = validate_muxing_config(video_config, audio_config);
         assert!(result.is_valid);
     }
 }

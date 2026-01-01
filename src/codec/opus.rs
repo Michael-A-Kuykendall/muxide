@@ -129,8 +129,6 @@ impl OpusFrameDuration {
     }
 }
 
-use crate::assert_invariant;
-
 /// Extract frame duration from the Opus TOC byte.
 ///
 /// The TOC byte encodes the frame configuration:
@@ -142,10 +140,9 @@ pub fn opus_frame_duration_from_toc(toc: u8) -> Option<OpusFrameDuration> {
     // Extract config bits (bits 3-7)
     let config = (toc >> 3) & 0x1F;
 
-    assert_invariant!(
-        config <= 31,
-        "INV-600: Opus TOC config must be valid (0-31)"
-    );
+    if config > 31 {
+        return None;
+    }
 
     // Frame size depends on config value
     // See RFC 6716 Section 3.1
@@ -170,15 +167,16 @@ pub fn opus_frame_duration_from_toc(toc: u8) -> Option<OpusFrameDuration> {
 /// Opus packets can contain 1, 2, or a variable number of frames.
 /// Returns (frame_count, is_vbr) where is_vbr indicates variable bitrate.
 pub fn opus_frame_count(packet: &[u8]) -> Option<(u8, bool)> {
-    assert_invariant!(
-        !packet.is_empty(),
-        "INV-601: Opus frame count requires non-empty packet"
-    );
+    if packet.is_empty() {
+        return None;
+    }
 
     let toc = packet[0];
     let code = toc & 0x03;
 
-    assert_invariant!(code <= 3, "INV-602: Opus TOC code must be valid (0-3)");
+    if code > 3 {
+        return None;
+    }
 
     match code {
         0 => Some((1, false)), // 1 frame
@@ -186,16 +184,17 @@ pub fn opus_frame_count(packet: &[u8]) -> Option<(u8, bool)> {
         2 => Some((2, true)),  // 2 frames, different sizes
         3 => {
             // Code 3: arbitrary number of frames
-            assert_invariant!(
-                packet.len() >= 2,
-                "INV-603: Opus code 3 requires at least 2 bytes"
-            );
+            if packet.len() < 2 {
+                return None;
+            }
 
             let frame_count_byte = packet[1];
             let is_vbr = (frame_count_byte & 0x80) != 0;
             let count = frame_count_byte & 0x3F;
 
-            assert_invariant!(count > 0, "INV-604: Opus frame count must be non-zero");
+            if count == 0 {
+                return None;
+            }
 
             Some((count, is_vbr))
         }
@@ -207,22 +206,22 @@ pub fn opus_frame_count(packet: &[u8]) -> Option<(u8, bool)> {
 ///
 /// Returns the total number of samples (at 48kHz) in the packet.
 pub fn opus_packet_samples(packet: &[u8]) -> Option<u32> {
-    assert_invariant!(
-        !packet.is_empty(),
-        "INV-605: Opus packet samples requires non-empty packet"
-    );
+    if packet.is_empty() {
+        return None;
+    }
 
     let frame_duration = opus_frame_duration_from_toc(packet[0])?;
     let (frame_count, _) = opus_frame_count(packet)?;
 
-    assert_invariant!(
-        (1..=63).contains(&frame_count),
-        "INV-606: Opus frame count must be reasonable (1-63)"
-    );
+    if !(1..=63).contains(&frame_count) {
+        return None;
+    }
 
     let samples = frame_duration.samples() * frame_count as u32;
 
-    assert_invariant!(samples > 0, "INV-607: Opus packet samples must be positive");
+    if samples == 0 {
+        return None;
+    }
 
     Some(samples)
 }
@@ -358,6 +357,27 @@ mod tests {
         // Binary: 0b00100_0_01 = 0x21 = 33
         let packet2 = vec![0x21, 0x01, 0x02, 0x03];
         assert_eq!(opus_packet_samples(&packet2), Some(1920));
+    }
+
+    #[test]
+    fn test_opus_functions_handle_bad_input_gracefully() {
+        // Empty packet should return None, not panic
+        assert_eq!(opus_frame_count(&[]), None);
+        assert_eq!(opus_packet_samples(&[]), None);
+
+        // Valid TOC config should work
+        let valid_toc = vec![0xFF]; // config=31, valid
+        assert_eq!(
+            opus_frame_duration_from_toc(valid_toc[0]),
+            Some(OpusFrameDuration::Ms5)
+        );
+        // But packet is too short for frame count
+        assert_eq!(opus_packet_samples(&valid_toc), None);
+
+        // Code 3 with count == 0 should return None
+        let invalid_code3 = vec![0x03, 0x00]; // code=3, count=0
+        assert_eq!(opus_frame_count(&invalid_code3), None);
+        assert_eq!(opus_packet_samples(&invalid_code3), None);
     }
 
     #[test]

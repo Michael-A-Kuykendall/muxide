@@ -238,7 +238,7 @@ fn cli_mux_different_audio_codecs() {
     assert!(output_path.exists());
 }
 
-/// Test CLI validate command (placeholder)
+/// Test CLI validate command with missing inputs
 #[test]
 fn cli_validate_command() {
     let output = Command::new("cargo")
@@ -246,12 +246,12 @@ fn cli_validate_command() {
         .output()
         .expect("Failed to run CLI");
 
-    assert!(output.status.success());
+    assert!(output.status.success()); // Command succeeds but reports validation failure
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Not yet implemented"));
+    assert!(stdout.contains("At least one of video or audio input must be specified"));
 }
 
-/// Test CLI info command (placeholder)
+/// Test CLI info command with nonexistent file
 #[test]
 fn cli_info_command() {
     let output = Command::new("cargo")
@@ -259,9 +259,32 @@ fn cli_info_command() {
         .output()
         .expect("Failed to run CLI");
 
+    assert!(!output.status.success()); // Should fail for nonexistent file
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Input file does not exist"));
+}
+
+/// Test CLI info command with valid MP4 file
+#[test]
+fn cli_info_command_valid_file() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "--bin",
+            "muxide",
+            "--",
+            "info",
+            "fixtures/minimal.mp4",
+        ])
+        .output()
+        .expect("Failed to run CLI");
+
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Not yet implemented"));
+    assert!(stdout.contains("Valid MP4: Yes"));
+    assert!(stdout.contains("ftyp"));
+    assert!(stdout.contains("moov"));
+    assert!(stdout.contains("mdat"));
 }
 
 /// Test CLI error handling - missing required parameters

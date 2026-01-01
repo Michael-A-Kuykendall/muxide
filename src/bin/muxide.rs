@@ -22,10 +22,10 @@ fn read_hex_bytes(contents: &str) -> Vec<u8> {
     out
 }
 
-/// Muxide - Zero-dependency pure-Rust MP4 muxer
+/// Muxide - Minimal-dependency pure-Rust MP4 muxer
 ///
 /// A professional-grade MP4 muxer designed for recording applications.
-/// Supports H.264/H.265/AV1 video and AAC/Opus audio with world-class error handling.
+/// Supports H.264/H.265/AV1/VP9 video and AAC/Opus audio with world-class error handling.
 #[derive(Parser)]
 #[command(name = "muxide")]
 #[command(version, about, long_about)]
@@ -393,14 +393,12 @@ fn mux_command(
     let output_file = File::create(&output)
         .with_context(|| format!("Failed to create output file: {}", output.display()))?;
 
+    if fragmented {
+        anyhow::bail!("Fragmented MP4 is not yet supported in the CLI. Use the library API with FragmentedMuxer.");
+    }
+
     // Build muxer configuration
-    let mut builder = if fragmented {
-        // For fragmented MP4, we'll need to implement FragmentedMuxer integration
-        // For now, fall back to regular muxer
-        MuxerBuilder::new(output_file)
-    } else {
-        MuxerBuilder::new(output_file)
-    };
+    let mut builder = MuxerBuilder::new(output_file);
 
     // Configure video if provided
     if let (Some(_video), Some(width), Some(height), Some(fps)) = (&video, width, height, fps) {
@@ -408,7 +406,10 @@ fn mux_command(
 
         // Invariant: Video codec must be supported
         assert_invariant!(
-            matches!(codec, VideoCodec::H264 | VideoCodec::H265 | VideoCodec::Av1),
+            matches!(
+                codec,
+                VideoCodec::H264 | VideoCodec::H265 | VideoCodec::Av1 | VideoCodec::Vp9
+            ),
             "Video codec must be one of the supported variants",
             "cli::mux_command"
         );
@@ -614,8 +615,8 @@ fn process_audio_frames(
 }
 
 fn validate_command(
-    _video: Option<PathBuf>,
-    _audio: Option<PathBuf>,
+    video: Option<PathBuf>,
+    audio: Option<PathBuf>,
     output: Option<PathBuf>,
     verbose: bool,
     json: bool,
@@ -624,10 +625,80 @@ fn validate_command(
         eprintln!("Running validation...");
     }
 
-    // Placeholder implementation
+    let mut is_valid = true;
+    let mut checks = Vec::new();
+
+    // Validate video input
+    if let Some(ref video_path) = video {
+        if !video_path.exists() {
+            checks.push(serde_json::json!({
+                "type": "video_file",
+                "status": "error",
+                "message": format!("Video file does not exist: {}", video_path.display())
+            }));
+            is_valid = false;
+        } else {
+            // Try to read and validate hex content
+            match validate_hex_file(video_path, "video") {
+                Ok(msg) => checks.push(serde_json::json!({
+                    "type": "video_file",
+                    "status": "success",
+                    "message": msg
+                })),
+                Err(e) => {
+                    checks.push(serde_json::json!({
+                        "type": "video_file",
+                        "status": "error",
+                        "message": format!("Video file validation failed: {}", e)
+                    }));
+                    is_valid = false;
+                }
+            }
+        }
+    }
+
+    // Validate audio input
+    if let Some(ref audio_path) = audio {
+        if !audio_path.exists() {
+            checks.push(serde_json::json!({
+                "type": "audio_file",
+                "status": "error",
+                "message": format!("Audio file does not exist: {}", audio_path.display())
+            }));
+            is_valid = false;
+        } else {
+            // Try to read and validate hex content
+            match validate_hex_file(audio_path, "audio") {
+                Ok(msg) => checks.push(serde_json::json!({
+                    "type": "audio_file",
+                    "status": "success",
+                    "message": msg
+                })),
+                Err(e) => {
+                    checks.push(serde_json::json!({
+                        "type": "audio_file",
+                        "status": "error",
+                        "message": format!("Audio file validation failed: {}", e)
+                    }));
+                    is_valid = false;
+                }
+            }
+        }
+    }
+
+    if video.is_none() && audio.is_none() {
+        checks.push(serde_json::json!({
+            "type": "input",
+            "status": "error",
+            "message": "At least one of video or audio input must be specified"
+        }));
+        is_valid = false;
+    }
+
     let report = serde_json::json!({
-        "status": "not_implemented",
-        "message": "Validation command not yet implemented"
+        "status": if is_valid { "success" } else { "failed" },
+        "valid": is_valid,
+        "checks": checks
     });
 
     if let Some(output_path) = output {
@@ -638,10 +709,60 @@ fn validate_command(
     } else if json {
         println!("{}", serde_json::to_string(&report)?);
     } else {
-        println!("Validation: Not yet implemented");
+        if is_valid {
+            println!("✅ Validation successful!");
+        } else {
+            println!("❌ Validation failed!");
+        }
+        for check in &checks {
+            let status = check["status"].as_str().unwrap();
+            let message = check["message"].as_str().unwrap();
+            if status == "error" {
+                println!("   ❌ {}", message);
+            } else {
+                println!("   ✅ {}", message);
+            }
+        }
     }
 
     Ok(())
+}
+
+fn validate_hex_file(path: &PathBuf, file_type: &str) -> Result<String> {
+    let file = File::open(path)
+        .with_context(|| format!("Failed to open {} file: {}", file_type, path.display()))?;
+
+    let mut reader = BufReader::new(file);
+    let mut content = String::new();
+    reader
+        .read_to_string(&mut content)
+        .with_context(|| format!("Failed to read {} file content", file_type))?;
+
+    // Check if content looks like hex
+    let hex_chars: String = content.chars().filter(|c| !c.is_whitespace()).collect();
+    if hex_chars.is_empty() {
+        anyhow::bail!("{} file is empty", file_type);
+    }
+    if hex_chars.len() % 2 != 0 {
+        anyhow::bail!("{} file contains odd number of hex characters", file_type);
+    }
+    for ch in hex_chars.chars() {
+        if !ch.is_ascii_hexdigit() {
+            anyhow::bail!("{} file contains invalid hex character: {}", file_type, ch);
+        }
+    }
+
+    // Try to convert to bytes
+    let bytes = read_hex_bytes(&content);
+    if bytes.is_empty() {
+        anyhow::bail!("{} file converted to empty byte array", file_type);
+    }
+
+    Ok(format!(
+        "{} file is valid hex ({} bytes)",
+        file_type,
+        bytes.len()
+    ))
 }
 
 fn info_command(input: PathBuf, verbose: bool, json: bool) -> Result<()> {
@@ -649,18 +770,100 @@ fn info_command(input: PathBuf, verbose: bool, json: bool) -> Result<()> {
         eprintln!("Analyzing file: {}", input.display());
     }
 
-    // Placeholder implementation
+    if !input.exists() {
+        anyhow::bail!("Input file does not exist: {}", input.display());
+    }
+
+    let file =
+        File::open(&input).with_context(|| format!("Failed to open file: {}", input.display()))?;
+
+    let mut reader = BufReader::new(file);
+    let mut buffer = Vec::new();
+    reader
+        .read_to_end(&mut buffer)
+        .with_context(|| "Failed to read file content")?;
+
+    if buffer.len() < 8 {
+        anyhow::bail!("File too small to be a valid MP4");
+    }
+
+    // Parse basic MP4 structure
+    let mut boxes = Vec::new();
+    let mut offset = 0;
+    while offset + 8 <= buffer.len() {
+        let size = u32::from_be_bytes(buffer[offset..offset + 4].try_into().unwrap()) as usize;
+        let typ = &buffer[offset + 4..offset + 8];
+
+        if size == 0 {
+            break; // Last box
+        }
+
+        if offset + size > buffer.len() {
+            boxes.push(serde_json::json!({
+                "type": "invalid",
+                "size": size,
+                "offset": offset,
+                "error": "Box size exceeds file size"
+            }));
+            break;
+        }
+
+        let box_type = std::str::from_utf8(typ).unwrap_or("????");
+        boxes.push(serde_json::json!({
+            "type": box_type,
+            "size": size,
+            "offset": offset
+        }));
+
+        offset += size;
+    }
+
+    // Check for common MP4 boxes and extract basic codec info
+    let has_ftyp = boxes.iter().any(|b| b["type"] == "ftyp");
+    let has_moov = boxes.iter().any(|b| b["type"] == "moov");
+    let _has_mdat = boxes.iter().any(|b| b["type"] == "mdat");
+    let is_valid_mp4 = has_ftyp && has_moov;
+
+    // Basic codec detection
+    let has_avc1 = boxes.iter().any(|b| b["type"] == "avc1");
+    let has_hvc1 = boxes.iter().any(|b| b["type"] == "hvc1");
+    let has_mp4a = boxes.iter().any(|b| b["type"] == "mp4a");
+    let has_vp09 = boxes.iter().any(|b| b["type"] == "vp09");
+
+    let video_codec = if has_avc1 {
+        "H.264/AVC"
+    } else if has_hvc1 {
+        "H.265/HEVC"
+    } else if has_vp09 {
+        "VP9"
+    } else {
+        "Unknown"
+    };
+    let has_audio = has_mp4a;
+
     let info = serde_json::json!({
         "file": input.display().to_string(),
-        "status": "not_implemented",
-        "message": "Info command not yet implemented"
+        "file_size": buffer.len(),
+        "is_valid_mp4": is_valid_mp4,
+        "video_codec": video_codec,
+        "has_audio": has_audio,
+        "boxes": boxes
     });
 
     if json {
-        println!("{}", serde_json::to_string(&info)?);
+        println!("{}", serde_json::to_string_pretty(&info)?);
     } else {
-        println!("File info: Not yet implemented");
         println!("File: {}", input.display());
+        println!("Size: {} bytes", buffer.len());
+        println!("Valid MP4: {}", if is_valid_mp4 { "Yes" } else { "No" });
+        println!("Video Codec: {}", video_codec);
+        println!("Has Audio: {}", if has_audio { "Yes" } else { "No" });
+        println!("Boxes found: {}", info["boxes"].as_array().unwrap().len());
+        for box_info in info["boxes"].as_array().unwrap() {
+            let typ = box_info["type"].as_str().unwrap();
+            let size = box_info["size"].as_u64().unwrap();
+            println!("  {}: {} bytes", typ, size);
+        }
     }
 
     Ok(())

@@ -1,6 +1,6 @@
 //! # Muxide
 //!
-//! **Zero-dependency pure-Rust MP4 muxer for recording applications.**
+//! **Minimal-dependency pure-Rust MP4 muxer for recording applications.**
 //!
 //! ## Core Invariant
 //!
@@ -10,8 +10,8 @@
 //!
 //! ## What Muxide Does
 //!
-//! - Accepts encoded H.264 (Annex B) video frames with timestamps
-//! - Accepts encoded AAC (ADTS) audio frames with timestamps  
+//! - Accepts encoded H.264/H.265/AV1/VP9 video frames with timestamps
+//! - Accepts encoded AAC/Opus audio frames with timestamps  
 //! - Outputs MP4 files with fast-start (moov before mdat) for instant web playback
 //! - Supports B-frames via explicit PTS/DTS
 //! - Supports fragmented MP4 (fMP4) for DASH/HLS streaming
@@ -29,13 +29,14 @@
 //! # Example
 //!
 //! ```no_run
-//! use muxide::api::{Muxer, MuxerConfig};
+//! use muxide::api::{MuxerBuilder, VideoCodec};
 //! use std::fs::File;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let file = File::create("out.mp4")?;
-//! let config = MuxerConfig::new(1920, 1080, 30.0);
-//! let mut muxer = Muxer::new(file, config)?;
+//! let mut muxer = MuxerBuilder::new(file)
+//!     .video(VideoCodec::H264, 1920, 1080, 30.0)
+//!     .build()?;
 //!
 //! // Write frames (encoded elsewhere).
 //! // muxer.write_video(pts_secs, annex_b_bytes, is_keyframe)?;

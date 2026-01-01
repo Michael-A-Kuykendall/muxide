@@ -1,9 +1,9 @@
 [package]
 name = "muxide"
-version = "0.1.4"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.74"
-description = "Zero-dependency pure-Rust MP4 muxer for recording applications. Includes CLI tool and library API."
+description = "Minimal-dependency pure-Rust MP4 muxer for recording applications. Includes CLI tool and library API."
 authors = ["Michael A. Kuykendall <michaelallenkuykendall@gmail.com>"]
 readme = "README.md"
 repository = "https://github.com/Michael-A-Kuykendall/muxide"
@@ -15,11 +15,13 @@ categories = ["multimedia", "multimedia::encoding", "multimedia::video", "comman
 exclude = [
 	".github/",
 	".vscode/",
+	"release-notes/",
 	"target/",
 	"**/*.mp4",
 	"**/*.gif",
 	"**/*.rgb",
 	"**/*.h264",
+	"**/*.bak",
 ]
 
 [[bin]]
@@ -38,3 +40,8 @@ thiserror = "1.0"
 lazy_static = "1.4"
 proptest = "=1.5.0"
 tempfile = "3.0"
+criterion = "0.5"
+
+[[bench]]
+name = "muxing"
+harness = false

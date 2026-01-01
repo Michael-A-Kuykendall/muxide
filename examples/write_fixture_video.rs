@@ -1,4 +1,4 @@
-use muxide::api::{Muxer, MuxerConfig, MuxerStats};
+use muxide::api::{MuxerBuilder, MuxerConfig, MuxerStats, VideoCodec};
 use std::{env, fs::File, io::Write, path::PathBuf};
 
 fn read_hex_bytes(contents: &str) -> Vec<u8> {
@@ -28,7 +28,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let file = File::create(&out_path)?;
     let config = MuxerConfig::new(640, 480, 30.0);
-    let mut muxer = Muxer::new(file, config)?;
+    let mut muxer = MuxerBuilder::new(file)
+        .video(
+            VideoCodec::H264,
+            config.width,
+            config.height,
+            config.framerate,
+        )
+        .build()?;
 
     muxer.write_video(0.0, &frame0, true)?;
     muxer.write_video(1.0 / 30.0, &frame1, false)?;

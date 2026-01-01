@@ -1,4 +1,4 @@
-use muxide::api::{AacProfile, AudioCodec, Muxer, MuxerConfig};
+use muxide::api::{AacProfile, AudioCodec, MuxerBuilder, MuxerConfig, VideoCodec};
 use std::{env, fs::File, path::PathBuf};
 
 /// Generate a simple AAC ADTS frame for testing
@@ -62,7 +62,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fast_start: true,
     };
 
-    let mut muxer = Muxer::new(file, config)?;
+    let mut muxer = MuxerBuilder::new(file)
+        .video(
+            VideoCodec::H264,
+            config.width,
+            config.height,
+            config.framerate,
+        )
+        .audio(
+            config.audio.as_ref().unwrap().codec,
+            config.audio.as_ref().unwrap().sample_rate,
+            config.audio.as_ref().unwrap().channels,
+        )
+        .build()?;
 
     // Write video keyframe
     muxer.write_video(0.0, &video_frame, true)?;
