@@ -56,7 +56,12 @@ fn muxer_builder_creates_muxer_for_video_only() -> Result<(), Box<dyn std::error
     let (writer, buffer) = SharedBuffer::new();
     let config = MuxerConfig::new(640, 480, 30.0);
     let mut muxer = MuxerBuilder::new(writer)
-        .video(VideoCodec::H264, config.width, config.height, config.framerate)
+        .video(
+            VideoCodec::H264,
+            config.width,
+            config.height,
+            config.framerate,
+        )
         .build()?;
 
     muxer.write_video(0.0, &frame0, true)?;

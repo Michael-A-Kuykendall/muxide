@@ -29,7 +29,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let file = File::create(&out_path)?;
     let config = MuxerConfig::new(640, 480, 30.0);
     let mut muxer = MuxerBuilder::new(file)
-        .video(VideoCodec::H264, config.width, config.height, config.framerate)
+        .video(
+            VideoCodec::H264,
+            config.width,
+            config.height,
+            config.framerate,
+        )
         .build()?;
 
     muxer.write_video(0.0, &frame0, true)?;

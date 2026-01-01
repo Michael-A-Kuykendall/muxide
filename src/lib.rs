@@ -1,6 +1,6 @@
 //! # Muxide
 //!
-//! **Zero-dependency pure-Rust MP4 muxer for recording applications.**
+//! **Minimal-dependency pure-Rust MP4 muxer for recording applications.**
 //!
 //! ## Core Invariant
 //!
@@ -10,8 +10,8 @@
 //!
 //! ## What Muxide Does
 //!
-//! - Accepts encoded H.264 (Annex B) video frames with timestamps
-//! - Accepts encoded AAC (ADTS) audio frames with timestamps  
+//! - Accepts encoded H.264/H.265/AV1/VP9 video frames with timestamps
+//! - Accepts encoded AAC/Opus audio frames with timestamps  
 //! - Outputs MP4 files with fast-start (moov before mdat) for instant web playback
 //! - Supports B-frames via explicit PTS/DTS
 //! - Supports fragmented MP4 (fMP4) for DASH/HLS streaming

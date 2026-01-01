@@ -245,6 +245,12 @@ pub struct MuxerBuilder<Writer> {
     sps: Option<Vec<u8>>,
     /// PPS data for fragmented MP4.
     pps: Option<Vec<u8>>,
+    /// VPS data for H.265 fragmented MP4.
+    vps: Option<Vec<u8>>,
+    /// AV1 sequence header OBU for fragmented MP4.
+    av1_sequence_header: Option<Vec<u8>>,
+    /// VP9 configuration for fragmented MP4.
+    vp9_config: Option<crate::codec::vp9::Vp9Config>,
 }
 
 impl<Writer> MuxerBuilder<Writer> {
@@ -258,6 +264,9 @@ impl<Writer> MuxerBuilder<Writer> {
             fast_start: true, // Default ON for web compatibility
             sps: None,
             pps: None,
+            vps: None,
+            av1_sequence_header: None,
+            vp9_config: None,
         }
     }
 
@@ -297,6 +306,27 @@ impl<Writer> MuxerBuilder<Writer> {
     /// Required for proper fragmented MP4 initialization.
     pub fn with_pps(mut self, pps: Vec<u8>) -> Self {
         self.pps = Some(pps);
+        self
+    }
+
+    /// Set VPS (Video Parameter Set) data for H.265 fragmented MP4.
+    /// Required for proper H.265 fragmented MP4 initialization.
+    pub fn with_vps(mut self, vps: Vec<u8>) -> Self {
+        self.vps = Some(vps);
+        self
+    }
+
+    /// Set AV1 sequence header OBU for fragmented MP4.
+    /// Required for proper AV1 fragmented MP4 initialization.
+    pub fn with_av1_sequence_header(mut self, sequence_header: Vec<u8>) -> Self {
+        self.av1_sequence_header = Some(sequence_header);
+        self
+    }
+
+    /// Set VP9 configuration for fragmented MP4.
+    /// Required for proper VP9 fragmented MP4 initialization.
+    pub fn with_vp9_config(mut self, config: crate::codec::vp9::Vp9Config) -> Self {
+        self.vp9_config = Some(config);
         self
     }
 
@@ -394,33 +424,72 @@ impl<Writer> MuxerBuilder<Writer> {
     /// Create a fragmented MP4 muxer.
     ///
     /// This creates a `FragmentedMuxer` with the configuration from this builder.
-    /// For H.264/H.265, SPS and PPS must be provided using `with_sps()` and `with_pps()`.
+    /// Supports H.264, H.265, AV1, and VP9 video for fragmented MP4.
+    /// Codec-specific parameters must be provided using the appropriate with_() methods.
     /// Only video configuration is supported for fragmented MP4.
     ///
     /// # Errors
     ///
-    /// Returns an error if video configuration is missing or SPS/PPS are not provided for H.264/H.265.
+    /// Returns an error if video configuration is missing, unsupported codec,
+    /// or required codec parameters are not provided.
     pub fn new_with_fragment(self) -> Result<FragmentedMuxer, MuxerError> {
         // Fragmented MP4 requires video configuration
         let (codec, width, height, _framerate) =
             self.video.ok_or(MuxerError::MissingVideoConfig)?;
 
-        let (sps, pps) = match codec {
-            VideoCodec::H264 | VideoCodec::H265 => {
-                let sps = self.sps.ok_or_else(|| MuxerError::Io(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "SPS must be provided for H.264/H.265 fragmented MP4 using with_sps()",
-                )))?;
-                let pps = self.pps.ok_or_else(|| MuxerError::Io(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "PPS must be provided for H.264/H.265 fragmented MP4 using with_pps()",
-                )))?;
-                (sps, pps)
+        // Extract codec-specific configuration
+        let (sps, pps, vps, av1_sequence_header, vp9_config) = match codec {
+            VideoCodec::H264 => {
+                let sps = self.sps.ok_or_else(|| {
+                    MuxerError::Io(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "SPS must be provided for H.264 fragmented MP4 using with_sps()",
+                    ))
+                })?;
+                let pps = self.pps.ok_or_else(|| {
+                    MuxerError::Io(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "PPS must be provided for H.264 fragmented MP4 using with_pps()",
+                    ))
+                })?;
+                (sps, pps, None, None, None)
             }
-            VideoCodec::Av1 | VideoCodec::Vp9 => {
-                // For AV1/VP9, SPS/PPS are not used in the same way
-                // Use empty defaults for now
-                (vec![], vec![])
+            VideoCodec::H265 => {
+                let vps = self.vps.ok_or_else(|| {
+                    MuxerError::Io(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "VPS must be provided for H.265 fragmented MP4 using with_vps()",
+                    ))
+                })?;
+                let sps = self.sps.ok_or_else(|| {
+                    MuxerError::Io(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "SPS must be provided for H.265 fragmented MP4 using with_sps()",
+                    ))
+                })?;
+                let pps = self.pps.ok_or_else(|| {
+                    MuxerError::Io(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "PPS must be provided for H.265 fragmented MP4 using with_pps()",
+                    ))
+                })?;
+                (sps, pps, Some(vps), None, None)
+            }
+            VideoCodec::Av1 => {
+                let av1_sequence_header = self.av1_sequence_header.ok_or_else(|| MuxerError::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "AV1 sequence header must be provided for AV1 fragmented MP4 using with_av1_sequence_header()",
+                )))?;
+                (vec![], vec![], None, Some(av1_sequence_header), None)
+            }
+            VideoCodec::Vp9 => {
+                let vp9_config = self.vp9_config.ok_or_else(|| {
+                    MuxerError::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "VP9 config must be provided for VP9 fragmented MP4 using with_vp9_config()",
+                ))
+                })?;
+                (vec![], vec![], None, None, Some(vp9_config))
             }
         };
 
@@ -431,6 +500,9 @@ impl<Writer> MuxerBuilder<Writer> {
             fragment_duration_ms: 2000, // 2 second fragments
             sps,
             pps,
+            vps,
+            av1_sequence_header,
+            vp9_config,
         };
 
         Ok(FragmentedMuxer::new(config))
@@ -501,8 +573,16 @@ pub enum MuxerError {
     AlreadyFinished,
     /// Video `pts` must be non-negative.
     NegativeVideoPts { pts: f64, frame_index: u64 },
+    /// Video `dts` must be non-negative.
+    NegativeVideoDts { dts: f64, frame_index: u64 },
+    /// Video `pts` must be finite (not NaN or Inf).
+    InvalidVideoPts { pts: f64, frame_index: u64 },
+    /// Video `dts` must be finite (not NaN or Inf).
+    InvalidVideoDts { dts: f64, frame_index: u64 },
     /// Audio `pts` must be non-negative.
     NegativeAudioPts { pts: f64, frame_index: u64 },
+    /// Audio `pts` must be finite (not NaN or Inf).
+    InvalidAudioPts { pts: f64, frame_index: u64 },
     /// Audio was written but no audio track was configured.
     AudioNotConfigured,
     /// Audio sample is empty.
@@ -571,8 +651,24 @@ impl fmt::Display for MuxerError {
                 write!(f, "video frame {} has negative PTS ({:.3}s): timestamps must be >= 0.0", 
                        frame_index, pts)
             }
+            MuxerError::InvalidVideoPts { pts, frame_index } => {
+                write!(f, "video frame {} has invalid PTS ({:.3}s): timestamps must be finite (not NaN or Inf)", 
+                       frame_index, pts)
+            }
+            MuxerError::NegativeVideoDts { dts, frame_index } => {
+                write!(f, "video frame {} has negative DTS ({:.3}s): decode timestamps must be >= 0.0", 
+                       frame_index, dts)
+            }
+            MuxerError::InvalidVideoDts { dts, frame_index } => {
+                write!(f, "video frame {} has invalid DTS ({:.3}s): decode timestamps must be finite (not NaN or Inf)", 
+                       frame_index, dts)
+            }
             MuxerError::NegativeAudioPts { pts, frame_index } => {
                 write!(f, "audio frame {} has negative PTS ({:.3}s): timestamps must be >= 0.0",
+                       frame_index, pts)
+            }
+            MuxerError::InvalidAudioPts { pts, frame_index } => {
+                write!(f, "audio frame {} has invalid PTS ({:.3}s): timestamps must be finite (not NaN or Inf)",
                        frame_index, pts)
             }
             MuxerError::AudioNotConfigured => {
@@ -640,13 +736,7 @@ impl fmt::Display for MuxerError {
 }
 
 impl std::error::Error for MuxerError {}
-
-// Placeholder for future implementation.  The actual encoding logic will
-// live in a private `muxer` module.  For now we provide stub methods
-// returning errors.  These stubs ensure that the API compiles and can be
-// used by downstream code while implementation proceeds in later slices.
 impl<Writer: Write> Muxer<Writer> {
-
     /// Write a video frame to the container.
     ///
     /// `pts` is the presentation timestamp in seconds.  Frames must
@@ -665,6 +755,11 @@ impl<Writer: Write> Muxer<Writer> {
         // Reject empty frames - they cause playback issues
         if data.is_empty() {
             return Err(MuxerError::EmptyVideoFrame { frame_index });
+        }
+
+        // Validate PTS is finite (not NaN or Inf)
+        if !pts.is_finite() {
+            return Err(MuxerError::InvalidVideoPts { pts, frame_index });
         }
 
         // Validate PTS is non-negative
@@ -730,17 +825,24 @@ impl<Writer: Write> Muxer<Writer> {
             return Err(MuxerError::EmptyVideoFrame { frame_index });
         }
 
+        // Validate PTS is finite (not NaN or Inf)
+        if !pts.is_finite() {
+            return Err(MuxerError::InvalidVideoPts { pts, frame_index });
+        }
+
         // Validate PTS is non-negative
         if pts < 0.0 {
             return Err(MuxerError::NegativeVideoPts { pts, frame_index });
         }
 
+        // Validate DTS is finite (not NaN or Inf)
+        if !dts.is_finite() {
+            return Err(MuxerError::InvalidVideoDts { dts, frame_index });
+        }
+
         // Validate DTS is non-negative
         if dts < 0.0 {
-            return Err(MuxerError::NegativeVideoPts {
-                pts: dts,
-                frame_index,
-            });
+            return Err(MuxerError::NegativeVideoDts { dts, frame_index });
         }
 
         // Note: PTS can be less than DTS for B-frames (displayed before their decode position)
@@ -820,6 +922,11 @@ impl<Writer: Write> Muxer<Writer> {
         }
 
         let frame_index = self.audio_frame_count;
+
+        // Validate PTS is finite (not NaN or Inf)
+        if !pts.is_finite() {
+            return Err(MuxerError::InvalidAudioPts { pts, frame_index });
+        }
 
         // Validate PTS is non-negative
         if pts < 0.0 {

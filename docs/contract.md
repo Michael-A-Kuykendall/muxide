@@ -1,6 +1,6 @@
-# Muxide API Contract (v0.1.0)
+# Muxide API Contract (v0.2.x)
 
-This document defines the public API contract and invariants for the v0.1.0 release of Muxide.  The contract is intended to be a stable reference for users of the crate and for implementers working on the internals.  All public items in the `muxide::api` module are covered by this contract.
+This document defines the public API contract and invariants for the v0.2.x series of Muxide. The contract is intended to be a stable reference for users of the crate and for implementers working on the internals. All public items in the `muxide::api` module are covered by this contract.
 
 ## High‑Level API
 
@@ -12,6 +12,7 @@ Muxide exposes a builder pattern for creating a `Muxer` instance that writes an 
   * `H264` — H.264/AVC video codec. Bitstreams must be in Annex B format.
   * `H265` — H.265/HEVC video codec. Bitstreams must be in Annex B format.
   * `Av1` — AV1 video codec. Bitstreams must be supplied as an OBU stream.
+  * `Vp9` — VP9 video codec. Bitstreams must be supplied as compressed frames.
 
 * `AudioCodec`: Enumeration of supported audio codecs.
   * `Aac` — AAC audio codec, encoded as ADTS frames. Only AAC LC is expected to play back correctly.

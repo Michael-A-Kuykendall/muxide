@@ -15,13 +15,13 @@
 
 ---
 
-> **Muxide** takes correctly-timestamped, already-encoded audio/video frames and produces a standards-compliant MP4 — **pure Rust, zero runtime dependencies, no FFmpeg.**
+> **Muxide** takes correctly-timestamped, already-encoded audio/video frames and produces a standards-compliant MP4 — **pure Rust, minimal external dependencies, no FFmpeg.**
 
 <table>
 <tr>
 <td align="center"><strong>Your Encoder</strong><br><sub>H.264 / HEVC / AV1<br>AAC / Opus</sub></td>
 <td align="center">➡️</td>
-<td align="center"><strong>Muxide</strong><br><sub>Pure Rust<br>Zero deps</sub></td>
+<td align="center"><strong>Muxide</strong><br><sub>Pure Rust<br>Minimal external deps</sub></td>
 <td align="center">➡️</td>
 <td align="center"><strong>playable.mp4</strong><br><sub>Standards-compliant<br>Fast-start ready</sub></td>
 </tr>
@@ -121,7 +121,7 @@ If input violates the contract, Muxide **fails fast** with explicit errors—no 
 | Principle | Implementation |
 |-----------|----------------|
 | 🦀 **Pure Rust** | No unsafe, no FFI, no C bindings |
-| 📦 **Zero deps** | Only `std` — no runtime dependencies |
+| 📦 **Minimal deps** | Only essential Rust crates — no external binaries |
 | 🧵 **Thread-safe** | `Send + Sync` when writer is |
 | ✅ **Well-tested** | Unit, integration, property tests |
 | 📜 **MIT license** | No GPL, no copyleft concerns |
@@ -194,14 +194,69 @@ muxer.write_audio(0.0, &opus_packet)?;
 ### Fragmented MP4 (DASH/HLS)
 
 ```rust
+use muxide::codec::vp9::Vp9Config;
+
+// H.264
+let sps_bytes = vec![0x67, 0x42, 0x00, 0x1e, 0xda, 0x02, 0x80, 0x2d, 0x8b, 0x11];
+let pps_bytes = vec![0x68, 0xce, 0x38, 0x80];
+
 let mut muxer = MuxerBuilder::new(file)
     .video(VideoCodec::H264, 1920, 1080, 30.0)
-    .fragmented(true)  // Enable fMP4 mode
-    .build()?;
+    .with_sps(sps_bytes)
+    .with_pps(pps_bytes)
+    .new_with_fragment()?;
 
-// Write frames, then flush fragments periodically
-muxer.write_video(0.0, &frame, true)?;
-muxer.flush_fragment()?;  // Writes an moof+mdat pair
+// H.265
+let vps_bytes = vec![0x40, 0x01, 0x0c, 0x01, 0xff, 0xff, 0x01, 0x60, 0x00];
+let sps_bytes = vec![0x42, 0x01, 0x01, 0x01, 0x60, 0x00, 0x00, 0x03, 0x00, 0x90, 0x00];
+let pps_bytes = vec![0x44, 0x01, 0xc0, 0x73, 0xc0, 0x4c, 0x90];
+
+let mut muxer = MuxerBuilder::new(file)
+    .video(VideoCodec::H265, 1920, 1080, 30.0)
+    .with_vps(vps_bytes)
+    .with_sps(sps_bytes)
+    .with_pps(pps_bytes)
+    .new_with_fragment()?;
+
+// AV1
+let seq_header_bytes = vec![
+    0x0A, 0x10, // OBU header + size (example)
+    0x00, 0x00, 0x00, 0x00,
+];
+
+let mut muxer = MuxerBuilder::new(file)
+    .video(VideoCodec::Av1, 1920, 1080, 30.0)
+    .with_av1_sequence_header(seq_header_bytes)
+    .new_with_fragment()?;
+
+// VP9
+let vp9_config = Vp9Config {
+    width: 1920,
+    height: 1080,
+    profile: 0,
+    bit_depth: 8,
+    color_space: 0,
+    transfer_function: 0,
+    matrix_coefficients: 0,
+    level: 0,
+    full_range_flag: 0,
+};
+
+let mut muxer = MuxerBuilder::new(file)
+    .video(VideoCodec::Vp9, 1920, 1080, 30.0)
+    .with_vp9_config(vp9_config)
+    .new_with_fragment()?;
+
+// Get init segment (ftyp + moov)
+let init_segment = muxer.init_segment();
+
+// Write frames...
+muxer.write_video(0, 0, &frame, true)?;
+
+// Get media segments (moof + mdat)
+if let Some(segment) = muxer.flush_segment() {
+    // Send segment to client
+}
 ```
 
 ### B-Frames with Explicit DTS
@@ -395,7 +450,7 @@ FFmpeg is excellent, but:
 - Process orchestration overhead
 - "What flags was this built with?" debugging
 
-Muxide is a single `cargo add` with zero external dependencies.
+Muxide is a single `cargo add` with minimal external dependencies.
 
 </details>
 

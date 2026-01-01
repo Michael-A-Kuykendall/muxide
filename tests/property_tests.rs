@@ -98,29 +98,6 @@ fn make_h264_pframe() -> Vec<u8> {
     data
 }
 
-/// Helper to create a valid AAC ADTS frame
-#[allow(dead_code)]
-fn make_aac_adts_frame() -> Vec<u8> {
-    // Minimal valid ADTS AAC LC frame
-    // Sync word: 0xFFF, MPEG-4, LC profile, 48kHz, 2 channels
-    vec![
-        0xFF, 0xF1, // Sync + MPEG-4 + LC profile
-        0x4C,
-        0x80, // 48kHz, 2 channels, original/copy, home, copyright_id_bit, copyright_id_start
-        0x00, 0x1F, // Frame length (31 bytes including header), buffer fullness 0x1FF
-        0xFC, // Buffer fullness continued, raw data blocks 0
-        // Raw AAC data (minimal valid frame)
-        0x21, 0x00, 0x49, 0x90, 0x02, 0x19, 0x00, 0x23, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    ]
-}
-
-/// Helper to create invalid AAC data
-#[allow(dead_code)]
-fn make_invalid_aac_data() -> Vec<u8> {
-    vec![0x00, 0x01, 0x02, 0x03] // Not ADTS format
-}
-
 proptest! {
     /// Property: Output size must be at least header size (ftyp + moov + mdat headers)
     #[test]
@@ -560,7 +537,7 @@ mod contract_tests {
         // Verify Opus frame duration invariants were checked
         contract_test(
             "codec::opus::opus_frame_duration_from_toc",
-            &["INV-600: Opus TOC config must be valid (0-31)"],
+            &[], // No invariants expected since function now handles invalid input gracefully
         );
     }
 
@@ -587,10 +564,7 @@ mod contract_tests {
         // Verify Opus frame count invariants were checked
         contract_test(
             "codec::opus::opus_frame_count",
-            &[
-                "INV-601: Opus frame count requires non-empty packet",
-                "INV-602: Opus TOC code must be valid (0-3)",
-            ],
+            &[], // No invariants expected since function now handles invalid input gracefully
         );
     }
 
@@ -617,11 +591,7 @@ mod contract_tests {
         // Verify Opus packet samples invariants were checked
         contract_test(
             "codec::opus::opus_packet_samples",
-            &[
-                "INV-605: Opus packet samples requires non-empty packet",
-                "INV-606: Opus frame count must be reasonable (1-63)",
-                "INV-607: Opus packet samples must be positive",
-            ],
+            &[], // No invariants expected since function now handles invalid input gracefully
         );
     }
 

@@ -1,9 +1,9 @@
 [package]
 name = "muxide"
-version = "0.1.5"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.74"
-description = "Zero-dependency pure-Rust MP4 muxer for recording applications. Includes CLI tool and library API."
+description = "Minimal-dependency pure-Rust MP4 muxer for recording applications. Includes CLI tool and library API."
 authors = ["Michael A. Kuykendall <michaelallenkuykendall@gmail.com>"]
 readme = "README.md"
 repository = "https://github.com/Michael-A-Kuykendall/muxide"

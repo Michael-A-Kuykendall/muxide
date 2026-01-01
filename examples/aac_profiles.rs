@@ -63,8 +63,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let mut muxer = MuxerBuilder::new(file)
-        .video(VideoCodec::H264, config.width, config.height, config.framerate)
-        .audio(config.audio.as_ref().unwrap().codec, config.audio.as_ref().unwrap().sample_rate, config.audio.as_ref().unwrap().channels)
+        .video(
+            VideoCodec::H264,
+            config.width,
+            config.height,
+            config.framerate,
+        )
+        .audio(
+            config.audio.as_ref().unwrap().codec,
+            config.audio.as_ref().unwrap().sample_rate,
+            config.audio.as_ref().unwrap().channels,
+        )
         .build()?;
 
     // Write video keyframe

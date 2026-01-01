@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use muxide::api::{MuxerBuilder, VideoCodec, AudioCodec, AacProfile};
+use muxide::api::{AacProfile, AudioCodec, MuxerBuilder, VideoCodec};
 use std::io::Cursor;
 
 fn bench_h264_muxing(c: &mut Criterion) {
@@ -9,7 +9,8 @@ fn bench_h264_muxing(c: &mut Criterion) {
             let writer = Cursor::new(&mut buffer);
             let mut muxer = MuxerBuilder::new(writer)
                 .video(VideoCodec::H264, 1920, 1080, 30.0)
-                .build().expect("build muxer");
+                .build()
+                .expect("build muxer");
 
             // Simulate 1000 frames (using dummy data for benchmark)
             let dummy_frame = vec![0u8; 10000]; // ~10KB per frame
@@ -31,7 +32,8 @@ fn bench_h264_with_audio(c: &mut Criterion) {
             let mut muxer = MuxerBuilder::new(writer)
                 .video(VideoCodec::H264, 1920, 1080, 30.0)
                 .audio(AudioCodec::Aac(AacProfile::Lc), 48000, 2)
-                .build().expect("build muxer");
+                .build()
+                .expect("build muxer");
 
             let dummy_video = vec![0u8; 10000];
             let dummy_audio = vec![0u8; 1000];

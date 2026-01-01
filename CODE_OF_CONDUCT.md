@@ -27,7 +27,7 @@ Examples of unacceptable behavior:
 This project maintains a clear focus on technical excellence:
 
 - **Stay on topic**: Discussions should relate to Muxide's development
-- **Respect the philosophy**: Contributions should align with zero-dependency, pure-Rust principles
+- **Respect the philosophy**: Contributions should align with minimal-dependency, pure-Rust principles
 - **Quality over quantity**: We value thoughtful contributions over high volume
 - **Technical merit**: Decisions are made based on technical merit and project goals
 

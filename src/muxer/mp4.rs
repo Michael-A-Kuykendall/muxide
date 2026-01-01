@@ -676,16 +676,26 @@ impl<Writer: Write> Mp4Writer<Writer> {
 
         if !audio_present {
             let chunk_offset = if !self.video_samples.is_empty() {
-                let mut payload_size: u32 = 0;
+                let mut payload_size: u64 = 0;
                 for sample in &self.video_samples {
-                    payload_size += sample.data.len() as u32;
+                    payload_size = payload_size
+                        .checked_add(sample.data.len() as u64)
+                        .ok_or_else(|| {
+                            io::Error::new(io::ErrorKind::InvalidData, "MP4 payload size overflow")
+                        })?;
                 }
 
-                let mdat_size = 8 + payload_size;
+                let mdat_size = 8u64 + payload_size;
+                if mdat_size > u32::MAX as u64 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "MP4 MDAT box size exceeds u32::MAX",
+                    ));
+                }
                 Self::write_counted(
                     &mut self.writer,
                     &mut self.bytes_written,
-                    &mdat_size.to_be_bytes(),
+                    &(mdat_size as u32).to_be_bytes(),
                 )?;
                 Self::write_counted(&mut self.writer, &mut self.bytes_written, b"mdat")?;
                 for sample in &self.video_samples {
@@ -712,19 +722,33 @@ impl<Writer: Write> Mp4Writer<Writer> {
         }
 
         // Audio present - write interleaved mdat then moov
-        let mut total_payload_size: u32 = 0;
+        let mut total_payload_size: u64 = 0;
         for sample in &self.video_samples {
-            total_payload_size += sample.data.len() as u32;
+            total_payload_size = total_payload_size
+                .checked_add(sample.data.len() as u64)
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "MP4 payload size overflow")
+                })?;
         }
         for sample in &self.audio_samples {
-            total_payload_size += sample.data.len() as u32;
+            total_payload_size = total_payload_size
+                .checked_add(sample.data.len() as u64)
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "MP4 payload size overflow")
+                })?;
         }
 
-        let mdat_size = 8 + total_payload_size;
+        let mdat_size = 8u64 + total_payload_size;
+        if mdat_size > u32::MAX as u64 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "MP4 MDAT box size exceeds u32::MAX",
+            ));
+        }
         Self::write_counted(
             &mut self.writer,
             &mut self.bytes_written,
-            &mdat_size.to_be_bytes(),
+            &(mdat_size as u32).to_be_bytes(),
         )?;
         Self::write_counted(&mut self.writer, &mut self.bytes_written, b"mdat")?;
 
@@ -787,18 +811,32 @@ impl<Writer: Write> Mp4Writer<Writer> {
         video_config: &VideoConfig,
     ) -> io::Result<()> {
         let ftyp_box = build_ftyp_box();
-        let ftyp_len = ftyp_box.len() as u32;
+        let ftyp_len = ftyp_box.len() as u64;
 
         // Calculate total mdat payload size
-        let mut mdat_payload_size: u32 = 0;
+        let mut mdat_payload_size: u64 = 0;
         for sample in &self.video_samples {
-            mdat_payload_size += sample.data.len() as u32;
+            mdat_payload_size = mdat_payload_size
+                .checked_add(sample.data.len() as u64)
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "MP4 payload size overflow")
+                })?;
         }
         for sample in &self.audio_samples {
-            mdat_payload_size += sample.data.len() as u32;
+            mdat_payload_size = mdat_payload_size
+                .checked_add(sample.data.len() as u64)
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "MP4 payload size overflow")
+                })?;
         }
-        let mdat_header_size = 8u32;
+        let mdat_header_size = 8u64;
         let mdat_total_size = mdat_header_size + mdat_payload_size;
+        if mdat_total_size > u32::MAX as u64 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "MP4 MDAT box size exceeds u32::MAX",
+            ));
+        }
 
         let audio_present = self.audio_track.is_some();
 
@@ -877,7 +915,7 @@ impl<Writer: Write> Mp4Writer<Writer> {
                 metadata,
             )
         };
-        let moov_len = placeholder_moov.len() as u32;
+        let moov_len = placeholder_moov.len() as u64;
 
         // Now we know: mdat starts at ftyp_len + moov_len
         let mdat_data_start = ftyp_len + moov_len + mdat_header_size;
@@ -886,19 +924,31 @@ impl<Writer: Write> Mp4Writer<Writer> {
         let (final_video_tables, final_audio_tables) = if audio_present {
             let schedule = self.compute_interleave_schedule();
 
-            let mut video_offsets = Vec::with_capacity(self.video_samples.len());
-            let mut audio_offsets = Vec::with_capacity(self.audio_samples.len());
+            let mut video_offsets: Vec<u32> = Vec::with_capacity(self.video_samples.len());
+            let mut audio_offsets: Vec<u32> = Vec::with_capacity(self.audio_samples.len());
             let mut cursor = mdat_data_start;
 
             for (_, kind, idx) in &schedule {
                 match kind {
                     TrackKind::Video => {
-                        video_offsets.push(cursor);
-                        cursor += self.video_samples[*idx].data.len() as u32;
+                        if cursor > u32::MAX as u64 {
+                            return Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "MP4 chunk offset exceeds u32::MAX",
+                            ));
+                        }
+                        video_offsets.push(cursor as u32);
+                        cursor += self.video_samples[*idx].data.len() as u64;
                     }
                     TrackKind::Audio => {
-                        audio_offsets.push(cursor);
-                        cursor += self.audio_samples[*idx].data.len() as u32;
+                        if cursor > u32::MAX as u64 {
+                            return Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "MP4 chunk offset exceeds u32::MAX",
+                            ));
+                        }
+                        audio_offsets.push(cursor as u32);
+                        cursor += self.audio_samples[*idx].data.len() as u64;
                     }
                 }
             }
@@ -921,7 +971,13 @@ impl<Writer: Write> Mp4Writer<Writer> {
             let chunk_offsets = if self.video_samples.is_empty() {
                 Vec::new()
             } else {
-                vec![mdat_data_start]
+                if mdat_data_start > u32::MAX as u64 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "MP4 chunk offset exceeds u32::MAX",
+                    ));
+                }
+                vec![mdat_data_start as u32]
             };
             let samples_per_chunk = if self.video_samples.is_empty() {
                 0
@@ -956,7 +1012,7 @@ impl<Writer: Write> Mp4Writer<Writer> {
         Self::write_counted(
             &mut self.writer,
             &mut self.bytes_written,
-            &mdat_total_size.to_be_bytes(),
+            &(mdat_total_size as u32).to_be_bytes(),
         )?;
         Self::write_counted(&mut self.writer, &mut self.bytes_written, b"mdat")?;
 
@@ -2115,16 +2171,6 @@ fn build_url_box() -> Vec<u8> {
     let mut payload = Vec::new();
     payload.extend_from_slice(&1u32.to_be_bytes());
     build_box(b"url ", &payload)
-}
-
-#[allow(dead_code)]
-fn build_mdhd_box() -> Vec<u8> {
-    build_mdhd_box_with_timescale_and_duration(MEDIA_TIMESCALE, 0, None)
-}
-
-#[allow(dead_code)]
-fn build_mdhd_box_with_timescale(timescale: u32, duration: u64) -> Vec<u8> {
-    build_mdhd_box_with_timescale_and_duration(timescale, duration, None)
 }
 
 fn encode_language_code(language: &str) -> [u8; 2] {

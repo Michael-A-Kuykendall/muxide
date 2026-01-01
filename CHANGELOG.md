@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.0 (January 1, 2026) - Fragmented MP4 Multi-Codec + Audit Hardening
+
+### 🎬 **Fragmented MP4 (fMP4) Multi-Codec Support**
+- **Multi-Codec fMP4**: Fragmented MP4 init+media segment support for **H.264, H.265/HEVC, AV1, and VP9**
+- **HEVC `hvcC` Correctness**: Config box structure aligns with emitted parameter set arrays; signals 4-byte NAL length prefixes
+- **Explicit Sample Contract**: Fragmented video samples are **MP4 length-prefixed** (4-byte NAL length prefixes), not Annex B start codes
+
+### 🧱 **Safety & Contract Enforcement**
+- **Monotonic DTS Enforcement**: Fragmented muxer rejects decreasing DTS instead of underflowing
+- **Timestamp Validation**: Rejects non-finite timestamps (NaN/Inf) for video PTS/DTS and audio PTS with specific error variants
+- **MP4 Size Overflow Hardening**: Prevents `mdat` size/offset overflow with deterministic errors
+
+### 🔍 **Interop / Conformance Scope**
+- **Interop Note**: H.264 outputs were spot-checked with FFmpeg/ffprobe (non-fragmented MP4 and concatenated fMP4 init+segment); broader player/device conformance validation is ongoing.
+
 ## 0.1.5 (December 30, 2025) - Quality & Completeness
 
 ### 🎯 **VP9 Production Readiness**

@@ -268,7 +268,14 @@ fn cli_info_command() {
 #[test]
 fn cli_info_command_valid_file() {
     let output = Command::new("cargo")
-        .args(["run", "--bin", "muxide", "--", "info", "fixtures/minimal.mp4"])
+        .args([
+            "run",
+            "--bin",
+            "muxide",
+            "--",
+            "info",
+            "fixtures/minimal.mp4",
+        ])
         .output()
         .expect("Failed to run CLI");
 

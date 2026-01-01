@@ -66,7 +66,7 @@ VP9 Frame:
 - `tests/vp9_muxing.rs` - VP9-specific tests
 
 ## Dependencies
-- No new external dependencies (maintain zero-dependency goal)
+- No new external dependencies (maintain minimal-dependency goal)
 - Use existing bit manipulation utilities
 
 ## Success Criteria

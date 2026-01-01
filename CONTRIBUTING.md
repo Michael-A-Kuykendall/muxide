@@ -52,7 +52,7 @@ Bug reports via GitHub Issues are welcome! Please include:
 
 If a contribution is discussed and approved:
 - Rust 2021 edition with `cargo fmt` and `cargo clippy`
-- Zero runtime dependencies (only std)
+- Minimal runtime dependencies (only std and essential crates)
 - MSRV 1.74 compatibility
 - Property-based tests for new functionality
 - All public APIs must have documentation
@@ -60,7 +60,7 @@ If a contribution is discussed and approved:
 ## Muxide Philosophy
 
 Any accepted work must align with:
-- **Zero dependencies**: Only std at runtime
+- **Minimal dependencies**: Only std and essential crates at runtime
 - **Pure Rust**: No unsafe, no FFI
 - **Strict validation**: Garbage in, error out
 - **Standards compliance**: Valid ISO-BMFF output

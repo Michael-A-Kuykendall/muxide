@@ -229,19 +229,15 @@ fn parse_vp9_color_config(data: &[u8], mut offset: usize) -> Option<(u8, u8, u8,
     }
 
     // Parse bit depth
-    let bit_depth = if (data[offset] & 0x01) != 0 {
-        10
-    } else {
-        8
-    };
+    let bit_depth = if (data[offset] & 0x01) != 0 { 10 } else { 8 };
 
     // Parse color space and transfer characteristics
     let color_space = (data[offset] >> 1) & 0x07;
     let transfer_function = (data[offset] >> 4) & 0x07;
     let matrix_coefficients = (data[offset] >> 7) & 0x01;
-    
+
     offset += 1;
-    
+
     // If color_space != 0, parse additional color config including full_range
     let full_range_flag = if color_space != 0 {
         if offset >= data.len() {
@@ -253,7 +249,13 @@ fn parse_vp9_color_config(data: &[u8], mut offset: usize) -> Option<(u8, u8, u8,
         0 // Limited range for monochrome
     };
 
-    Some((bit_depth, color_space, transfer_function, matrix_coefficients, full_range_flag))
+    Some((
+        bit_depth,
+        color_space,
+        transfer_function,
+        matrix_coefficients,
+        full_range_flag,
+    ))
 }
 
 /// Validate that a buffer contains a valid VP9 frame.
@@ -324,12 +326,12 @@ mod tests {
         // Minimal valid VP9 keyframe with config
         let keyframe = vec![
             0x49, 0x83, 0x42, // frame marker
-            0x00,             // profile=0, show_existing=0, frame_type=0
-            0x00,             // byte 4 (possibly part of header)
-            0x80, 0x02,       // width = 256 (var_uint: starts at offset 5)
-            0x80, 0x02,       // height = 256 (var_uint)
-            0x00,             // render size same as frame size
-            0x00,             // color config (8-bit, color_space=0)
+            0x00, // profile=0, show_existing=0, frame_type=0
+            0x00, // byte 4 (possibly part of header)
+            0x80, 0x02, // width = 256 (var_uint: starts at offset 5)
+            0x80, 0x02, // height = 256 (var_uint)
+            0x00, // render size same as frame size
+            0x00, // color config (8-bit, color_space=0)
         ];
         let config = extract_vp9_config(&keyframe);
         assert!(config.is_some());
@@ -359,13 +361,13 @@ mod tests {
     fn test_parse_vp9_var_uint() {
         // Test parsing variable-length unsigned integers
         let data = [0x7F, 0x80, 0x01, 0x80, 0x80, 0x01];
-        
+
         // Single byte: 0x7F = 127
         assert_eq!(parse_vp9_var_uint(&data, 0), Some((127, 1)));
-        
+
         // Two bytes: 0x80 0x01 = 128
         assert_eq!(parse_vp9_var_uint(&data, 1), Some((128, 3)));
-        
+
         // Three bytes: 0x80 0x80 0x01 = 16384
         assert_eq!(parse_vp9_var_uint(&data, 3), Some((16384, 6)));
     }
@@ -381,12 +383,18 @@ mod tests {
     fn test_parse_vp9_color_config() {
         let data = [0x00]; // 8-bit, color_space=0, transfer=0, matrix=0
         assert_eq!(parse_vp9_color_config(&data, 0), Some((8, 0, 0, 0, 0)));
-        
+
         let data_10bit = [0x01]; // 10-bit
-        assert_eq!(parse_vp9_color_config(&data_10bit, 0), Some((10, 0, 0, 0, 0)));
-        
+        assert_eq!(
+            parse_vp9_color_config(&data_10bit, 0),
+            Some((10, 0, 0, 0, 0))
+        );
+
         let data_color = [0x12]; // 8-bit, color_space=1, transfer=1, matrix=0
-        assert_eq!(parse_vp9_color_config(&data_color, 0), Some((8, 1, 1, 0, 0)));
+        assert_eq!(
+            parse_vp9_color_config(&data_color, 0),
+            Some((8, 1, 1, 0, 0))
+        );
     }
 
     #[test]

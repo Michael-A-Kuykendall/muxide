@@ -22,10 +22,10 @@ fn read_hex_bytes(contents: &str) -> Vec<u8> {
     out
 }
 
-/// Muxide - Zero-dependency pure-Rust MP4 muxer
+/// Muxide - Minimal-dependency pure-Rust MP4 muxer
 ///
 /// A professional-grade MP4 muxer designed for recording applications.
-/// Supports H.264/H.265/AV1 video and AAC/Opus audio with world-class error handling.
+/// Supports H.264/H.265/AV1/VP9 video and AAC/Opus audio with world-class error handling.
 #[derive(Parser)]
 #[command(name = "muxide")]
 #[command(version, about, long_about)]
@@ -393,14 +393,12 @@ fn mux_command(
     let output_file = File::create(&output)
         .with_context(|| format!("Failed to create output file: {}", output.display()))?;
 
+    if fragmented {
+        anyhow::bail!("Fragmented MP4 is not yet supported in the CLI. Use the library API with FragmentedMuxer.");
+    }
+
     // Build muxer configuration
-    let mut builder = if fragmented {
-        // For fragmented MP4, we'll need to implement FragmentedMuxer integration
-        // For now, fall back to regular muxer
-        MuxerBuilder::new(output_file)
-    } else {
-        MuxerBuilder::new(output_file)
-    };
+    let mut builder = MuxerBuilder::new(output_file);
 
     // Configure video if provided
     if let (Some(_video), Some(width), Some(height), Some(fps)) = (&video, width, height, fps) {
@@ -408,7 +406,10 @@ fn mux_command(
 
         // Invariant: Video codec must be supported
         assert_invariant!(
-            matches!(codec, VideoCodec::H264 | VideoCodec::H265 | VideoCodec::Av1),
+            matches!(
+                codec,
+                VideoCodec::H264 | VideoCodec::H265 | VideoCodec::Av1 | VideoCodec::Vp9
+            ),
             "Video codec must be one of the supported variants",
             "cli::mux_command"
         );
@@ -733,7 +734,8 @@ fn validate_hex_file(path: &PathBuf, file_type: &str) -> Result<String> {
 
     let mut reader = BufReader::new(file);
     let mut content = String::new();
-    reader.read_to_string(&mut content)
+    reader
+        .read_to_string(&mut content)
         .with_context(|| format!("Failed to read {} file content", file_type))?;
 
     // Check if content looks like hex
@@ -756,7 +758,11 @@ fn validate_hex_file(path: &PathBuf, file_type: &str) -> Result<String> {
         anyhow::bail!("{} file converted to empty byte array", file_type);
     }
 
-    Ok(format!("{} file is valid hex ({} bytes)", file_type, bytes.len()))
+    Ok(format!(
+        "{} file is valid hex ({} bytes)",
+        file_type,
+        bytes.len()
+    ))
 }
 
 fn info_command(input: PathBuf, verbose: bool, json: bool) -> Result<()> {
@@ -768,12 +774,13 @@ fn info_command(input: PathBuf, verbose: bool, json: bool) -> Result<()> {
         anyhow::bail!("Input file does not exist: {}", input.display());
     }
 
-    let file = File::open(&input)
-        .with_context(|| format!("Failed to open file: {}", input.display()))?;
+    let file =
+        File::open(&input).with_context(|| format!("Failed to open file: {}", input.display()))?;
 
     let mut reader = BufReader::new(file);
     let mut buffer = Vec::new();
-    reader.read_to_end(&mut buffer)
+    reader
+        .read_to_end(&mut buffer)
         .with_context(|| "Failed to read file content")?;
 
     if buffer.len() < 8 {
@@ -784,8 +791,8 @@ fn info_command(input: PathBuf, verbose: bool, json: bool) -> Result<()> {
     let mut boxes = Vec::new();
     let mut offset = 0;
     while offset + 8 <= buffer.len() {
-        let size = u32::from_be_bytes(buffer[offset..offset+4].try_into().unwrap()) as usize;
-        let typ = &buffer[offset+4..offset+8];
+        let size = u32::from_be_bytes(buffer[offset..offset + 4].try_into().unwrap()) as usize;
+        let typ = &buffer[offset + 4..offset + 8];
 
         if size == 0 {
             break; // Last box
@@ -823,7 +830,15 @@ fn info_command(input: PathBuf, verbose: bool, json: bool) -> Result<()> {
     let has_mp4a = boxes.iter().any(|b| b["type"] == "mp4a");
     let has_vp09 = boxes.iter().any(|b| b["type"] == "vp09");
 
-    let video_codec = if has_avc1 { "H.264/AVC" } else if has_hvc1 { "H.265/HEVC" } else if has_vp09 { "VP9" } else { "Unknown" };
+    let video_codec = if has_avc1 {
+        "H.264/AVC"
+    } else if has_hvc1 {
+        "H.265/HEVC"
+    } else if has_vp09 {
+        "VP9"
+    } else {
+        "Unknown"
+    };
     let has_audio = has_mp4a;
 
     let info = serde_json::json!({
