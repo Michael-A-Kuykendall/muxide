@@ -15,6 +15,7 @@ categories = ["multimedia", "multimedia::encoding", "multimedia::video", "comman
 exclude = [
 	".github/",
 	".vscode/",
+	"release-notes/",
 	"target/",
 	"**/*.mp4",
 	"**/*.gif",
