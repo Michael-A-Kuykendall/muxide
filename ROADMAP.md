@@ -43,18 +43,32 @@ Its mission is **simple muxing done right**: encoded frames in, playable MP4 out
 - [ ] **CLI Fragmented MP4**: Implement fragmented MP4 support in CLI tool
 - [ ] **Documentation Polish**: Complete API docs, better examples, troubleshooting guide
 
+## Next Goals (v0.2.0) - Developer Experience & Performance
+
+### v0.1.6 (Q2 2026) - Release Hygiene & Alignment
+- [ ] **Git Release Tags**: Add retroactive tags for v0.1.0 through v0.1.5 for better version tracking
+- [x] **Dependency Clarity**: Update README.md to clarify "minimal runtime dependencies" (no FFmpeg/C binaries, but Rust crates are used)
+- [ ] **Audit Alignment**: Address Muxide-specific findings from CODE_AUDIT_REPORT.md (e.g., API ergonomics) in v0.2.0 planning
+- [ ] **CLI Fragmented MP4**: Implement fragmented MP4 support in CLI tool
+- [ ] **Documentation Polish**: Complete API docs, better examples, troubleshooting guide
+
 ### High Priority
 - [ ] **Performance Benchmarks**: Establish baseline performance metrics and optimization targets
 - [ ] **SIMD Optimizations**: Performance improvements for hot paths in frame processing
+- [ ] **AI-Powered Muxing Hints**: Optional ML-based suggestions for optimal muxing parameters based on input analysis
+- [ ] **Quantum-Safe Metadata**: Experimental support for post-quantum cryptography in metadata encryption
 
 ### Medium Priority
 - [ ] **Enhanced Documentation**: More real-world examples and tutorials
 - [ ] **Async I/O Support**: Optional tokio-based async operations for large file handling
 - [ ] **WebAssembly Target**: Browser-based MP4 muxing for web applications
+- [ ] **Holographic Video Support**: Early exploration of 3D/holographic MP4 extensions for VR/AR content
+- [ ] **Blockchain-Integrated Provenance**: Immutable muxing logs via blockchain for content authenticity
 
 ### Lower Priority
 - [ ] **Chapter Markers**: Metadata support for navigation points in long videos
 - [ ] **Streaming Optimizations**: Further improvements for DASH/HLS low-latency streaming
+- [ ] **Neural Codec Interfaces**: Prototype integration with emerging AI-driven codecs for adaptive quality
 
 ## Future Possibilities (v0.3.0+)
 - [ ] **Hardware-accelerated Muxing**: GPU-assisted frame processing and I/O
