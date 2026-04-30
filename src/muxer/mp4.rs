@@ -1353,13 +1353,20 @@ fn build_moov_box(
 
     let mvhd_payload = build_mvhd_payload(video_duration_ms);
     let mvhd_box = build_box(b"mvhd", &mvhd_payload);
-    let trak_box = build_trak_box(video, video_tables, video_config, metadata);
+    let trak_box = build_trak_box(
+        video,
+        video_tables,
+        video_config,
+        metadata,
+        video_duration_ms,
+    );
 
     let mut payload = Vec::new();
     payload.extend_from_slice(&mvhd_box);
     payload.extend_from_slice(&trak_box);
     if let Some((audio_track, audio_tables)) = audio {
-        let audio_trak = build_audio_trak_box(audio_track, audio_tables, metadata);
+        let audio_trak =
+            build_audio_trak_box(audio_track, audio_tables, metadata, video_duration_ms);
         payload.extend_from_slice(&audio_trak);
     }
 
@@ -1378,8 +1385,9 @@ fn build_audio_trak_box(
     audio: &Mp4AudioTrack,
     tables: &SampleTables,
     metadata: Option<&Metadata>,
+    duration_ms: u32,
 ) -> Vec<u8> {
-    let tkhd_box = build_audio_tkhd_box();
+    let tkhd_box = build_audio_tkhd_box(duration_ms);
     let mdia_box = build_audio_mdia_box(audio, tables, metadata);
 
     let mut payload = Vec::new();
@@ -1388,8 +1396,8 @@ fn build_audio_trak_box(
     build_box(b"trak", &payload)
 }
 
-fn build_audio_tkhd_box() -> Vec<u8> {
-    build_tkhd_box_with_id(2, 0x0100, 0, 0)
+fn build_audio_tkhd_box(duration_ms: u32) -> Vec<u8> {
+    build_tkhd_box_with_id(2, 0x0100, 0, 0, duration_ms)
 }
 
 fn build_audio_mdia_box(
@@ -1614,8 +1622,9 @@ fn build_trak_box(
     tables: &SampleTables,
     video_config: &VideoConfig,
     metadata: Option<&Metadata>,
+    duration_ms: u32,
 ) -> Vec<u8> {
-    let tkhd_box = build_tkhd_box(video);
+    let tkhd_box = build_tkhd_box(video, duration_ms);
     let mdia_box = build_mdia_box(video, tables, video_config, metadata);
 
     let mut payload = Vec::new();
@@ -2234,19 +2243,26 @@ fn build_smhd_box() -> Vec<u8> {
     build_box(b"smhd", &payload)
 }
 
-fn build_tkhd_box(video: &Mp4VideoTrack) -> Vec<u8> {
-    build_tkhd_box_with_id(1, 0, video.width, video.height)
+fn build_tkhd_box(video: &Mp4VideoTrack, duration_ms: u32) -> Vec<u8> {
+    build_tkhd_box_with_id(1, 0, video.width, video.height, duration_ms)
 }
 
-fn build_tkhd_box_with_id(track_id: u32, volume: u16, width: u32, height: u32) -> Vec<u8> {
+fn build_tkhd_box_with_id(
+    track_id: u32,
+    volume: u16,
+    width: u32,
+    height: u32,
+    duration_ms: u32,
+) -> Vec<u8> {
     let mut payload = Vec::new();
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&track_id.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
-    payload.extend_from_slice(&0u64.to_be_bytes());
-    payload.extend_from_slice(&0u64.to_be_bytes());
+    payload.extend_from_slice(&duration_ms.to_be_bytes());
+    payload.extend_from_slice(&0u32.to_be_bytes());
+    payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&0u16.to_be_bytes());
     payload.extend_from_slice(&0u16.to_be_bytes());
     payload.extend_from_slice(&volume.to_be_bytes());
