@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.3 (May 21, 2026) - Second Audit Pass: Documentation, DRY, and Residual Bugs
+## 0.2.3 (May 21, 2026) - Documentation, DRY, and Residual Bugs
 
 ### 🐛 **Bug Fixes**
 - **`encode_video()` would panic on empty input instead of returning an error**: `encode_video()` called `is_keyframe(data)` before `write_video()`'s empty-data guard. If `data` was empty, the `assert_invariant!(!data.is_empty())` inside `is_keyframe()` would panic rather than return `MuxerError::EmptyVideoFrame`. Fixed by adding an early empty-data guard at the top of `encode_video()` so `is_keyframe()` is never called with empty data.
@@ -66,7 +66,7 @@
 - The `--fragmented` flag in the `mux` subcommand now works for H.264 and VP9 inputs. The CLI extracts SPS/PPS automatically from the Annex B bitstream for H.264 and VP9 config from the first keyframe for VP9, then writes a spec-correct `ftyp + moov + moof + mdat` fragmented MP4. H.265 and AV1 fragmented output require additional parameter-set arguments not yet exposed in the CLI; those will continue to use the library API directly.
 
 ### 🗺️ **Roadmap Cleanup**
-- Removed duplicate sections and speculative AI-generated items ("Quantum-Safe Metadata", "Holographic Video Support", "Blockchain-Integrated Provenance", "Neural Codec Interfaces") that had no grounding in the project's mission.
+- Removed duplicate sections and speculative placeholder items ("Quantum-Safe Metadata", "Holographic Video Support", "Blockchain-Integrated Provenance", "Neural Codec Interfaces") that had no grounding in the project's mission.
 
 ## 0.2.0 - Fragmented MP4 Multi-Codec & Safety
 
@@ -108,6 +108,18 @@
 - **Validation API**: Refactored validation functions to use structured config objects for better maintainability
 - **Build Cleanliness**: Resolved all compilation warnings for pristine release builds
 - **Test Coverage**: Maintained 100% test pass rate across 123+ unit tests and property-based validations
+
+## 0.1.4
+
+No functional changes relative to v0.1.3. Version bump only.
+
+Full Changelog: https://github.com/Michael-A-Kuykendall/muxide/compare/v0.1.3...v0.1.4
+
+## 0.1.3
+
+No functional changes relative to v0.1.2. Version bump only.
+
+Full Changelog: https://github.com/Michael-A-Kuykendall/muxide/compare/v0.1.2...v0.1.3
 
 ## 0.1.2
 

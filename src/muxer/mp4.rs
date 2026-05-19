@@ -370,9 +370,6 @@ pub enum Mp4WriterError {
     FirstFrameMissingSequenceHeader,
     /// The first VP9 keyframe must include valid frame header parameters.
     FirstFrameMissingVp9Config,
-    /// Audio sample is not a valid ADTS frame.
-    #[allow(dead_code)]
-    InvalidAdts,
     /// Audio sample has detailed ADTS validation errors.
     InvalidAdtsDetailed(Box<AdtsValidationError>),
     /// Audio sample is not a valid Opus packet.
@@ -401,7 +398,6 @@ impl fmt::Display for Mp4WriterError {
             Mp4WriterError::FirstFrameMissingVp9Config => {
                 write!(f, "first VP9 frame must contain valid frame header")
             }
-            Mp4WriterError::InvalidAdts => write!(f, "invalid ADTS frame"),
             Mp4WriterError::InvalidAdtsDetailed(err) => write!(f, "{}", err),
             Mp4WriterError::InvalidOpusPacket => write!(f, "invalid Opus packet"),
             Mp4WriterError::AudioNotEnabled => write!(f, "audio track not enabled"),
@@ -2460,7 +2456,7 @@ mod tests {
             Mp4WriterError::FirstFrameMustBeKeyframe,
             Mp4WriterError::FirstFrameMissingSpsPps,
             Mp4WriterError::FirstFrameMissingSequenceHeader,
-            Mp4WriterError::InvalidAdts,
+            Mp4WriterError::FirstFrameMissingVp9Config,
             Mp4WriterError::InvalidAdtsDetailed(Box::new(AdtsValidationError {
                 kind: AdtsErrorKind::FrameTooShort,
                 severity: ErrorSeverity::Error,

@@ -15,7 +15,7 @@ Muxide exposes a builder pattern for creating a `Muxer` instance that writes an 
   * `Vp9` — VP9 video codec. Bitstreams must be supplied as compressed frames.
 
 * `AudioCodec`: Enumeration of supported audio codecs.
-  * `Aac` — AAC audio codec, encoded as ADTS frames. Only AAC LC is expected to play back correctly.
+  * `Aac(AacProfile)` — AAC audio codec, encoded as ADTS frames. Profile selects LC, Main, SSR, LTP, HE, or HEv2; LC offers the broadest playback compatibility.
   * `Opus` — Opus audio codec, supplied as raw Opus packets. (In MP4, Opus is always signaled at 48 kHz.)
   * `None` — Indicates that no audio track will be created.
 
@@ -50,14 +50,12 @@ Muxide converts incoming timestamps in seconds (`pts: f64`) into a fixed interna
 
 ### Muxer Methods
 
-* `new(writer: Writer, config: MuxerConfig) -> Result<Muxer<Writer>, MuxerError>` — Convenience constructor that builds a muxer from a `MuxerConfig`.
-
 * `write_video(&mut self, pts: f64, data: &[u8], is_keyframe: bool) -> Result<(), MuxerError>` — Writes a video frame to the container.
 
   **Invariants:**
   - `pts` **must be non‑negative and strictly greater than the `pts` of the previous video frame**. Violations produce `MuxerError::NegativeVideoPts` or `MuxerError::NonIncreasingVideoPts`.
-  - `data` must contain a complete encoded frame in Annex B format.  The first video frame of a file must be a keyframe and must contain SPS and PPS NAL units; otherwise `MuxerError::FirstVideoFrameMustBeKeyframe` or `MuxerError::FirstVideoFrameMissingSpsPps` is returned.
-  - `is_keyframe` must accurately reflect whether the frame is a keyframe (IDR picture).  Incorrect keyframe flags may result in unseekable files.
+  - `data` must contain a complete encoded frame in the codec's expected format (Annex B for H.264/H.265; OBU stream for AV1; compressed frame for VP9).  The first video frame must be a keyframe and must include the codec configuration headers (SPS/PPS for H.264/H.265, Sequence Header OBU for AV1, frame header with parameters for VP9); missing headers produce `MuxerError::FirstVideoFrameMustBeKeyframe`, `MuxerError::FirstVideoFrameMissingSpsPps`, `MuxerError::FirstAv1FrameMissingSequenceHeader`, or `MuxerError::FirstVp9FrameMissingSequenceHeader`.
+  - `is_keyframe` must accurately reflect whether the frame is a keyframe.  Incorrect keyframe flags may result in unseekable files.
 
   **B-frames:**
   - `write_video()` is intended for streams where **PTS == DTS** (no reordering).
@@ -104,6 +102,7 @@ Muxide itself is implemented as a single-threaded writer; thread-safety here ref
 6. **Bitstream formats:**
   - H.264/H.265 video must be provided in Annex B format (start-code-prefixed NAL units).
   - AV1 video must be provided as an OBU stream.
+  - VP9 video must be provided as compressed VP9 frames (with frame headers intact, not Annex B).
 7. **Audio formats:**
   - AAC audio must be provided as ADTS frames.
   - Opus audio must be provided as raw Opus packets.

@@ -75,13 +75,13 @@ cargo install muxide
 muxide --help
 
 # Quick examples:
-muxide mux --video frames/ --output output.mp4 --width 1920 --height 1080 --fps 30
+muxide mux --video stream.h264 --output output.mp4 --width 1920 --height 1080 --fps 30
 muxide mux --video video.h264 --audio audio.aac --output output.mp4
-muxide validate --video frames/ --audio audio.aac
+muxide validate --video input.h264 --audio input.aac
 muxide info input.mp4
 ```
 
-The CLI tool accepts raw encoded frames from stdin or files and produces MP4 output.
+The CLI tool accepts hex-encoded input files and produces MP4 output.
 
 ## Core Invariant
 
@@ -307,8 +307,8 @@ muxide mux --json [args...] > stats.json
 # Validate input files without muxing
 muxide validate --video input.h264 --audio input.aac
 
-# Get info about supported codecs
-muxide info
+# Get info about an MP4 file
+muxide info input.mp4
 ```
 
 **Supported Codecs:**

@@ -63,11 +63,11 @@ enum Commands {
     /// Mux encoded frames into MP4 (default command)
     #[command(alias = "m")]
     Mux {
-        /// Input video file(s) or directory
+        /// Input video file
         #[arg(short, long)]
         video: Option<PathBuf>,
 
-        /// Input audio file(s) or directory
+        /// Input audio file
         #[arg(short, long)]
         audio: Option<PathBuf>,
 

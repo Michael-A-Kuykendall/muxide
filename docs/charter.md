@@ -9,7 +9,7 @@ so the repository does not contain contradictory statements.
 Deliver a **recording‑oriented MP4 writer** in pure Rust that:
 
 1. Provides a **simple API**: *just give me encoded frames and timestamps; I will write an MP4 file*.
-2. Supports **H.264/H.265/AV1/VP9 video** and optional **AAC/Opus audio**.
+2. Supports **H.264 video** and optional **AAC audio** (the v0.1.0 scope; additional codecs were added in later releases).
 3. Enforces **monotonic timestamps**, fails fast on invalid inputs, and supports B-frames when callers provide explicit PTS/DTS.
 4. Produces files that play correctly in major players (QuickTime, VLC, Windows Movies & TV, Chromium) without requiring external tools.
 5. Delivers each feature in small, verifiable increments with objective acceptance gates.
@@ -55,7 +55,7 @@ Contributions and roadmap decisions are managed by the lead maintainer.
 
 ## Versions
 
-* **v0.1.0**: MP4 muxing with H.264/H.265/AV1 video and optional AAC/Opus audio; single video and audio track; blocking IO. B-frames are supported when the caller supplies PTS/DTS explicitly.
+* **v0.1.0**: MP4 muxing with H.264 video and optional AAC audio; single video and audio track; blocking IO.
 * **v0.2.0+**: Multiple containers, async writers, additional streaming modes, and performance improvements.
 
 Once this charter is committed, it remains a historical record for the v0.1.0 cycle.  Future releases may introduce a new charter.

@@ -13,7 +13,7 @@ Its mission is **simple muxing done right**: encoded frames in, playable MP4 out
 - ✅ AAC audio muxing (ADTS format)
 - ✅ Opus audio muxing (48kHz raw packets)
 - ✅ Fast-start layout (moov before mdat)
-- ✅ **Fragmented MP4 for DASH/HLS streaming** (H.264, H.265, AV1, VP9) — library + CLI
+- ✅ **Fragmented MP4 for DASH/HLS streaming** (H.264, H.265, AV1, VP9 — library API; H.264 and VP9 via CLI)
 - ✅ B-frame support via explicit PTS/DTS
 - ✅ Property-based test suite
 - ✅ Published to crates.io

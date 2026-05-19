@@ -649,8 +649,6 @@ pub enum MuxerError {
     FirstAv1FrameMissingSequenceHeader,
     /// The first VP9 keyframe must include sequence parameters.
     FirstVp9FrameMissingSequenceHeader,
-    /// Audio sample is not a valid ADTS frame.
-    InvalidAdts { frame_index: u64 },
     /// Audio sample has detailed ADTS validation errors.
     InvalidAdtsDetailed {
         frame_index: u64,
@@ -749,10 +747,6 @@ impl fmt::Display for MuxerError {
             MuxerError::FirstVp9FrameMissingSequenceHeader => {
                 write!(f, "first VP9 frame must contain sequence parameters: \
                           ensure the first keyframe includes VP9 frame header with configuration data")
-            }
-            MuxerError::InvalidAdts { frame_index } => {
-                write!(f, "audio frame {} is not valid ADTS: ensure the frame starts with 0xFFF sync word",
-                       frame_index)
             }
             MuxerError::InvalidAdtsDetailed { frame_index, error } => {
                 write!(f, "audio frame {} ADTS validation failed: {}", frame_index, error)
@@ -934,7 +928,6 @@ impl<Writer: Write> Muxer<Writer> {
             Mp4WriterError::FirstFrameMissingVp9Config => {
                 MuxerError::FirstVp9FrameMissingSequenceHeader
             }
-            Mp4WriterError::InvalidAdts => MuxerError::InvalidAdts { frame_index },
             Mp4WriterError::InvalidAdtsDetailed(error) => {
                 MuxerError::InvalidAdtsDetailed { frame_index, error }
             }

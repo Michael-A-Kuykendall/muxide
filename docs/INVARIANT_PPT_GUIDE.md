@@ -158,15 +158,12 @@ fn contract_duration_calculation() {
 # All tests
 cargo test
 
-# Property tests only (more iterations)
-cargo test --test '*_props' -- --nocapture
+# Property tests only
+cargo test --test property_tests -- --nocapture
 PROPTEST_CASES=1000 cargo test
 
-# With coverage
-cargo tarpaulin --out Html --output-dir coverage/
-
-# Specific contract tests
-cargo test contract_
+# Contract and integration tests (part of the main test suite)
+cargo test
 ```
 
 ---
@@ -197,4 +194,3 @@ cargo test contract_
 ## References
 
 - proptest crate: https://docs.rs/proptest
-- Original PPT Guide: See `ppt_invariant_guide.md`
