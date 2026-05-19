@@ -310,7 +310,10 @@ fn cli_error_missing_video_params() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Video parameters must be complete when video input is provided"));
+    assert!(
+        stderr.contains("Video parameters") && stderr.contains("required"),
+        "Expected video parameters error, got: {stderr}"
+    );
 }
 
 /// Test CLI error handling - no video or audio

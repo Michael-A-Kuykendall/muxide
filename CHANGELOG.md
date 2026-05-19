@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.2.2 (May 20, 2026) - Codebase Audit: Correctness & Idiomatic Rust
+
+### 🐛 **Bug Fixes**
+- **AV1 keyframe detection**: `is_keyframe()` for AV1 previously returned `true` only for the first frame (a "first frame = keyframe" heuristic). It now delegates to `codec::av1::is_av1_keyframe()`, which parses actual OBU headers and checks the `frame_type` bits for correctness.
+- **`write_video()` missing finished guard**: `write_video()` did not check `self.finished`, so calling it after `finish()` would silently write into a finalized muxer. It now returns `MuxerError::AlreadyFinished` consistently with `write_video_with_dts()`.
+- **`fragmented.rs` moov box order**: `build_moov_fmp4()` was emitting `mvhd → mvex → trak`. ISO 14496-12 §8.3 requires `trak` to precede `mvex`. Fixed to `mvhd → trak → mvex`.
+- **`info_command` codec detection always returned "Unknown"**: The CLI scanned only top-level MP4 box types for FourCCs like `avc1`, `hvc1`, `vp09`, `mp4a`. These are deeply nested (inside `moov/trak/mdia/minf/stbl/stsd`) and were never found. Fixed by scanning the full buffer with `buffer.windows(4)`. AV1 (`av01`) detection also added.
+- **`creation_time` CLI arg was a stub**: `--creation-time` previously printed "Warning: creation_time not yet implemented" and did nothing. Changed to `Option<u64>` (Unix timestamp, no chrono dep), now properly builds and applies `Metadata::with_creation_time()`.
+- **`encode_audio()` anti-pattern**: `is_none()` check followed immediately by `.unwrap()` replaced with `let Some(...) else` binding.
+- **Misleading invariant in `convert_mp4_error()`**: `curr_pts: 0.0` hardcoded in the `NonIncreasingTimestamp` error arm. Now uses `self.last_video_pts.unwrap_or(0.0)` with a comment clarifying the arm is unreachable (PTS is validated before the inner call).
+
+### 🧹 **Removed Vapor / Dead Code**
+- **Deleted `src/config.rs`**: File was never declared in `lib.rs`, was completely invisible to the compiler, and duplicated structs already defined in `api.rs`. Pure dead weight.
+- **Removed duplicate `MuxerBuilder` methods**: `set_create_time()`, `set_language()`, `set_video_track()`, `set_audio_track()` were exact duplicates of `with_metadata()`, `video()`, and `audio()`. Callers (CLI) migrated to the canonical methods.
+- **Removed `Muxer::flush()`**: Exact alias for `finish()` with no semantic difference. Removed to eliminate the confusion between "flush" (partial write) and "finish" (finalize). The `FragmentedMuxer::flush_segment()` method is unrelated and unaffected.
+- **Removed bogus `assert_invariant!` calls from `api.rs`**: The AV1 invariant `is_key || video_frame_count > 0` was a tautology (always true). The VP9 invariant `is_key || data.len() >= 3` was misleading and wrong as a correctness check.
+- **Removed `assert_invariant!` calls from CLI (`src/bin/muxide.rs`)**: Ten assertions in `mux_command` panicked instead of returning errors, including always-true enum checks and post-fact checks on already-set state. Replaced meaningful range checks with `anyhow::ensure!` before builder calls; removed the rest entirely.
+
+### ✨ **Improvements**
+- **`MuxerConfig::into_builder()`**: New method converts a `MuxerConfig` into a pre-configured `MuxerBuilder`, transferring audio, metadata, and fast_start automatically. Previously callers had to pull out individual fields.
+- **`src/api.rs` module doc fixed**: Doc comment was placed between `use` statements as a `///` item doc. Corrected to `//!` at the top of the file.
+- **`read_hex_bytes()` returns `Result<Vec<u8>>`**: Previously used `assert!` and `.expect()` (panics). Now returns `anyhow::Result` with descriptive errors. All callers updated to propagate with `?`.
+- **`&PathBuf` → `&Path` in CLI functions**: `process_video_frames()`, `process_audio_frames()`, `validate_hex_file()` now accept `&std::path::Path` per Rust API guidelines.
+- **`validate_hex_file()` simplified**: Redundant manual hex-character validation loop removed. Now delegates to `read_hex_bytes()` which already performs full validation.
+- **Metadata building unified in CLI**: Title, creation_time, and language are now built into a single `Metadata` struct instead of being set through disparate methods.
+
 ## 0.2.1 (May 19, 2026) - Bug Fix & CLI Fragmented MP4
 
 ### 🐛 **Critical Bug Fix**

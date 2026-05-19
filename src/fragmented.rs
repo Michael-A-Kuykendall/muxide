@@ -281,13 +281,13 @@ fn build_moov_fmp4(config: &FragmentConfig) -> Vec<u8> {
     let mvhd = build_mvhd_fmp4(config.timescale);
     payload.extend_from_slice(&mvhd);
 
-    // mvex (movie extends) - required for fragmented MP4
-    let mvex = build_mvex();
-    payload.extend_from_slice(&mvex);
-
-    // trak (video track)
+    // trak (video track) — ISO 14496-12 §8.3: trak must precede mvex
     let trak = build_trak_fmp4(config);
     payload.extend_from_slice(&trak);
+
+    // mvex (movie extends) — required for fragmented MP4
+    let mvex = build_mvex();
+    payload.extend_from_slice(&mvex);
 
     build_box(b"moov", &payload)
 }

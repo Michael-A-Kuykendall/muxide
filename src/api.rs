@@ -1,14 +1,15 @@
+//! Public API definitions for the Muxide crate.
+//!
+//! This module contains the types and traits that form the public contract
+//! for users of the crate. Concrete implementations live in private
+//! modules. The API defined here intentionally exposes only the
+//! capabilities promised by the charter and contract documents.
+
 use crate::assert_invariant;
+use crate::codec::av1::is_av1_keyframe;
 use crate::codec::common::AnnexBNalIter;
 use crate::codec::vp9::is_vp9_keyframe;
 use crate::fragmented::{FragmentConfig, FragmentedMuxer};
-/// Public API definitions for the Muxide crate.
-///
-/// This module contains the types and traits that form the public contract
-/// for users of the crate.  Concrete implementations live in private
-/// modules.  The API defined here intentionally exposes only the
-/// capabilities promised by the charter and contract documents.  It does
-/// not contain any implementation details.
 use crate::muxer::mp4::{Mp4AudioTrack, Mp4VideoTrack, Mp4Writer, Mp4WriterError, MEDIA_TIMESCALE};
 use std::fmt;
 use std::io::Write;
@@ -212,6 +213,35 @@ impl MuxerConfig {
         self.fast_start = enabled;
         self
     }
+
+    /// Create a [`MuxerBuilder`] pre-configured from this `MuxerConfig`.
+    ///
+    /// Transfers all configuration fields (audio, metadata, fast_start) to
+    /// the builder automatically, so you only need to supply the writer and
+    /// video codec.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use muxide::api::{MuxerConfig, MuxerBuilder, VideoCodec};
+    /// use std::fs::File;
+    ///
+    /// let file = File::create("out.mp4").unwrap();
+    /// let config = MuxerConfig::new(1920, 1080, 30.0);
+    /// let muxer = config.into_builder(file, VideoCodec::H264).build().unwrap();
+    /// ```
+    pub fn into_builder<W: Write>(self, writer: W, video_codec: VideoCodec) -> MuxerBuilder<W> {
+        let mut builder = MuxerBuilder::new(writer)
+            .video(video_codec, self.width, self.height, self.framerate)
+            .with_fast_start(self.fast_start);
+        if let Some(meta) = self.metadata {
+            builder = builder.with_metadata(meta);
+        }
+        if let Some(audio) = self.audio {
+            builder = builder.audio(audio.codec, audio.sample_rate, audio.channels);
+        }
+        builder
+    }
 }
 
 /// Summary statistics returned when finishing a mux.
@@ -327,38 +357,6 @@ impl<Writer> MuxerBuilder<Writer> {
     /// Required for proper VP9 fragmented MP4 initialization.
     pub fn with_vp9_config(mut self, config: crate::codec::vp9::Vp9Config) -> Self {
         self.vp9_config = Some(config);
-        self
-    }
-
-    /// Set creation time for the media file
-    pub fn set_create_time(mut self, unix_timestamp: u64) -> Self {
-        self.metadata
-            .get_or_insert_with(Metadata::default)
-            .creation_time = Some(unix_timestamp);
-        self
-    }
-
-    /// Set language code for the media file
-    pub fn set_language(mut self, language: impl Into<String>) -> Self {
-        self.metadata.get_or_insert_with(Metadata::default).language = Some(language.into());
-        self
-    }
-
-    /// Set video track parameters
-    pub fn set_video_track(
-        mut self,
-        codec: VideoCodec,
-        width: u32,
-        height: u32,
-        framerate: f64,
-    ) -> Self {
-        self.video = Some((codec, width, height, framerate));
-        self
-    }
-
-    /// Set audio track parameters
-    pub fn set_audio_track(mut self, codec: AudioCodec, sample_rate: u32, channels: u16) -> Self {
-        self.audio = Some((codec, sample_rate, channels));
         self
     }
 
@@ -750,6 +748,9 @@ impl<Writer: Write> Muxer<Writer> {
         data: &[u8],
         is_keyframe: bool,
     ) -> Result<(), MuxerError> {
+        if self.finished {
+            return Err(MuxerError::AlreadyFinished);
+        }
         let frame_index = self.video_frame_count;
 
         // Reject empty frames - they cause playback issues
@@ -881,9 +882,11 @@ impl<Writer: Write> Muxer<Writer> {
     /// Convert internal Mp4WriterError to MuxerError with context
     fn convert_mp4_error(&self, err: Mp4WriterError, frame_index: u64) -> MuxerError {
         match err {
+            // Timestamp validation happens in write_video / write_video_with_dts before
+            // the inner writer is called, so this arm is unreachable in practice.
             Mp4WriterError::NonIncreasingTimestamp => MuxerError::NonIncreasingVideoPts {
                 prev_pts: self.last_video_pts.unwrap_or(0.0),
-                curr_pts: 0.0, // We don't have access here, but validation above catches this
+                curr_pts: self.last_video_pts.unwrap_or(0.0),
                 frame_index,
             },
             Mp4WriterError::FirstFrameMustBeKeyframe => MuxerError::FirstVideoFrameMustBeKeyframe,
@@ -987,10 +990,10 @@ impl<Writer: Write> Muxer<Writer> {
 
     /// Simple audio encoding method.
     pub fn encode_audio(&mut self, data: &[u8], samples: u32) -> Result<(), MuxerError> {
-        if self.audio_track.is_none() {
+        let Some(audio_track) = &self.audio_track else {
             return Err(MuxerError::AudioNotConfigured);
-        }
-        let sample_rate = self.audio_track.as_ref().unwrap().sample_rate;
+        };
+        let sample_rate = audio_track.sample_rate;
         let pts = self.current_audio_pts;
         self.write_audio(pts, data)?;
         self.current_audio_pts += samples as f64 / sample_rate as f64;
@@ -1020,33 +1023,8 @@ impl<Writer: Write> Muxer<Writer> {
                 });
                 has_idr
             }
-            VideoCodec::Av1 => {
-                // For AV1, check if it's a key frame (first frame or has key frame flag)
-                // Simple heuristic: first frame is keyframe
-                let is_key = self.video_frame_count == 0;
-
-                // INV-103: AV1 first frame must be keyframe
-                assert_invariant!(
-                    is_key || self.video_frame_count > 0,
-                    "AV1 first frame must be keyframe",
-                    "api::is_keyframe::av1"
-                );
-
-                is_key
-            }
-            VideoCodec::Vp9 => {
-                // Use VP9 keyframe detection
-                let is_key = is_vp9_keyframe(data).unwrap_or(false);
-
-                // INV-104: VP9 keyframe detection must handle invalid frames gracefully
-                assert_invariant!(
-                    is_key || data.len() >= 3,
-                    "VP9 keyframe detection requires minimum frame size",
-                    "api::is_keyframe::vp9"
-                );
-
-                is_key
-            }
+            VideoCodec::Av1 => is_av1_keyframe(data),
+            VideoCodec::Vp9 => is_vp9_keyframe(data).unwrap_or(false),
         }
     }
 
@@ -1092,11 +1070,6 @@ impl<Writer: Write> Muxer<Writer> {
     /// Finalise the container and return muxing statistics.
     pub fn finish_with_stats(mut self) -> Result<MuxerStats, MuxerError> {
         self.finish_in_place_with_stats()
-    }
-
-    /// Flush the muxer and finalize the output.
-    pub fn flush(self) -> Result<(), MuxerError> {
-        self.finish()
     }
 }
 

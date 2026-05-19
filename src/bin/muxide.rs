@@ -8,20 +8,28 @@ use indicatif::{ProgressBar, ProgressStyle};
 use serde::Serialize;
 
 use muxide::api::{AacProfile, AudioCodec, Metadata, Muxer, MuxerBuilder, VideoCodec};
-use muxide::assert_invariant;
 use muxide::codec::{h264 as h264_codec, vp9 as vp9_codec};
 use muxide::fragmented::{FragmentConfig, FragmentedMuxer};
 
-fn read_hex_bytes(contents: &str) -> Vec<u8> {
+/// Decode a whitespace-tolerant lowercase hex string into bytes.
+///
+/// Fixture files (`.264`, `.aac.adts`) are stored as hex text so they can
+/// live in version control without binary-diff noise.
+fn read_hex_bytes(contents: &str) -> Result<Vec<u8>> {
     let hex: String = contents.chars().filter(|c| !c.is_whitespace()).collect();
-    assert!(hex.len() % 2 == 0, "hex must have even length");
-
+    anyhow::ensure!(!hex.is_empty(), "hex input is empty");
+    anyhow::ensure!(
+        hex.len() % 2 == 0,
+        "hex input has odd number of characters ({})",
+        hex.len()
+    );
     let mut out = Vec::with_capacity(hex.len() / 2);
     for i in (0..hex.len()).step_by(2) {
-        let byte = u8::from_str_radix(&hex[i..i + 2], 16).expect("valid hex");
+        let byte = u8::from_str_radix(&hex[i..i + 2], 16)
+            .with_context(|| format!("invalid hex byte '{}'", &hex[i..i + 2]))?;
         out.push(byte);
     }
-    out
+    Ok(out)
 }
 
 /// Muxide - Minimal-dependency pure-Rust MP4 muxer
@@ -111,9 +119,9 @@ enum Commands {
         #[arg(long)]
         language: Option<String>,
 
-        /// Creation time (ISO 8601)
+        /// Creation time as Unix timestamp (seconds since 1970-01-01 UTC)
         #[arg(long)]
-        creation_time: Option<String>,
+        creation_time: Option<u64>,
 
         /// Validate inputs without creating output file
         #[arg(long)]
@@ -303,7 +311,7 @@ fn mux_command(
     fragment_duration_ms: u32,
     title: Option<String>,
     language: Option<String>,
-    creation_time: Option<String>,
+    creation_time: Option<u64>,
     dry_run: bool,
     mut progress: ProgressReporter,
     verbose: bool,
@@ -316,24 +324,6 @@ fn mux_command(
     // Validate required parameters
     if video.is_none() && audio.is_none() {
         anyhow::bail!("At least one of --video or --audio must be specified");
-    }
-
-    // Invariant: CLI must validate video parameters when video is specified
-    if video.is_some() {
-        assert_invariant!(
-            width.is_some() && height.is_some() && fps.is_some(),
-            "Video parameters must be complete when video input is provided",
-            "cli::mux_command"
-        );
-    }
-
-    // Invariant: CLI must validate audio parameters when audio is specified
-    if audio.is_some() {
-        assert_invariant!(
-            sample_rate.is_some() && channels.is_some(),
-            "Audio parameters must be complete when audio input is provided",
-            "cli::mux_command"
-        );
     }
 
     if video.is_some() && (width.is_none() || height.is_none() || fps.is_none()) {
@@ -417,7 +407,7 @@ fn mux_command(
         let mut reader = BufReader::new(frag_file);
         let mut hex_content = String::new();
         reader.read_to_string(&mut hex_content)?;
-        let frame_data = read_hex_bytes(&hex_content);
+        let frame_data = read_hex_bytes(&hex_content)?;
 
         // Build FragmentConfig and convert frame to segment-ready format
         let (segment_data, config) = match codec {
@@ -498,33 +488,20 @@ fn mux_command(
 
     // Configure video if provided
     if let (Some(_video), Some(width), Some(height), Some(fps)) = (&video, width, height, fps) {
-        let codec = video_codec.unwrap_or(VideoCodec::H264); // Default to H.264
+        let codec = video_codec.unwrap_or(VideoCodec::H264);
 
-        // Invariant: Video codec must be supported
-        assert_invariant!(
-            matches!(
-                codec,
-                VideoCodec::H264 | VideoCodec::H265 | VideoCodec::Av1 | VideoCodec::Vp9
-            ),
-            "Video codec must be one of the supported variants",
-            "cli::mux_command"
+        anyhow::ensure!(
+            (320..=4096).contains(&width) && (240..=2160).contains(&height),
+            "video dimensions {}x{} out of supported range (320x240 to 4096x2160)",
+            width,
+            height
+        );
+        anyhow::ensure!(
+            fps > 0.0 && fps <= 120.0,
+            "frame rate {fps:.1} out of supported range (0, 120]"
         );
 
         builder = builder.video(codec, width, height, fps);
-
-        // Invariant: Video dimensions must be reasonable
-        assert_invariant!(
-            width >= 320 && height >= 240 && width <= 4096 && height <= 2160,
-            "Video dimensions must be within reasonable limits (320x240 to 4096x2160)",
-            "cli::mux_command"
-        );
-
-        // Invariant: Frame rate must be reasonable
-        assert_invariant!(
-            fps > 0.0 && fps <= 120.0,
-            "Frame rate must be positive and within reasonable limits",
-            "cli::mux_command"
-        );
 
         if verbose {
             eprintln!(
@@ -536,30 +513,18 @@ fn mux_command(
 
     // Configure audio if provided
     if let (Some(_audio), Some(sample_rate), Some(channels)) = (&audio, sample_rate, channels) {
-        let codec = audio_codec.unwrap_or(AudioCodec::Aac(AacProfile::Lc)); // Default to AAC LC
+        let codec = audio_codec.unwrap_or(AudioCodec::Aac(AacProfile::Lc));
 
-        // Invariant: Audio codec must be supported
-        assert_invariant!(
-            matches!(codec, AudioCodec::Aac(_) | AudioCodec::Opus),
-            "Audio codec must be one of the supported variants",
-            "cli::mux_command"
+        anyhow::ensure!(
+            (1..=192_000).contains(&sample_rate),
+            "audio sample rate {sample_rate} Hz out of supported range [1, 192000]"
+        );
+        anyhow::ensure!(
+            (1..=8).contains(&channels),
+            "audio channel count {channels} out of supported range [1, 8]"
         );
 
         builder = builder.audio(codec, sample_rate, channels as u16);
-
-        // Invariant: Audio sample rate must be reasonable
-        assert_invariant!(
-            sample_rate > 0 && sample_rate <= 192000,
-            "Audio sample rate must be positive and within reasonable limits",
-            "cli::mux_command"
-        );
-
-        // Invariant: Audio channels must be reasonable
-        assert_invariant!(
-            channels > 0 && channels <= 8,
-            "Audio channels must be positive and within reasonable limits",
-            "cli::mux_command"
-        );
 
         if verbose {
             eprintln!(
@@ -575,17 +540,23 @@ fn mux_command(
         }
     }
 
-    // Add metadata
-    if let Some(title) = title {
-        builder = builder.with_metadata(Metadata::new().with_title(title));
+    // Build and apply metadata
+    let mut meta = Metadata::new();
+    let mut has_meta = false;
+    if let Some(t) = title {
+        meta = meta.with_title(t);
+        has_meta = true;
     }
-    if let Some(language) = language {
-        builder = builder.set_language(language);
+    if let Some(ts) = creation_time {
+        meta = meta.with_creation_time(ts);
+        has_meta = true;
     }
-    if let Some(_creation_time) = creation_time {
-        // Parse ISO 8601 datetime
-        // For now, skip this - would need chrono dependency
-        eprintln!("Warning: creation_time not yet implemented");
+    if let Some(lang) = language {
+        meta = meta.with_language(lang);
+        has_meta = true;
+    }
+    if has_meta {
+        builder = builder.with_metadata(meta);
     }
 
     // Build the muxer
@@ -606,30 +577,9 @@ fn mux_command(
         eprintln!("Finalizing MP4...");
     }
 
-    // Invariant: At least one media stream must be configured
-    assert_invariant!(
-        video.is_some() || audio.is_some(),
-        "At least one media stream (video or audio) must be configured",
-        "cli::mux_command"
-    );
-
-    // Invariant: Output file must be writable
-    assert_invariant!(
-        output.metadata().is_ok(),
-        "Output file path must be writable",
-        "cli::mux_command"
-    );
-
     muxer.finish().with_context(|| "Failed to finalize MP4")?;
 
     let stats = progress.finish()?;
-
-    // Invariant: Final output must have reasonable size
-    assert_invariant!(
-        stats.total_bytes > 0,
-        "Final output must have non-zero size",
-        "cli::mux_command"
-    );
 
     if json {
         println!("{}", serde_json::to_string_pretty(&stats)?);
@@ -645,7 +595,7 @@ fn mux_command(
 }
 
 fn process_video_frames(
-    video_path: &PathBuf,
+    video_path: &std::path::Path,
     muxer: &mut Muxer<File>,
     progress: &mut ProgressReporter,
     verbose: bool,
@@ -664,7 +614,7 @@ fn process_video_frames(
         .with_context(|| "Failed to read video data")?;
 
     // Convert hex string to bytes (like the example does)
-    let data = read_hex_bytes(&hex_content);
+    let data = read_hex_bytes(&hex_content)?;
 
     // Write the frame (assuming it's a keyframe at time 0)
     muxer
@@ -678,7 +628,7 @@ fn process_video_frames(
 }
 
 fn process_audio_frames(
-    audio_path: &PathBuf,
+    audio_path: &std::path::Path,
     muxer: &mut Muxer<File>,
     progress: &mut ProgressReporter,
     verbose: bool,
@@ -697,7 +647,7 @@ fn process_audio_frames(
         .with_context(|| "Failed to read audio data")?;
 
     // Convert hex string to bytes
-    let data = read_hex_bytes(&hex_content);
+    let data = read_hex_bytes(&hex_content)?;
 
     // Write the frame at time 0
     muxer
@@ -824,7 +774,7 @@ fn validate_command(
     Ok(())
 }
 
-fn validate_hex_file(path: &PathBuf, file_type: &str) -> Result<String> {
+fn validate_hex_file(path: &std::path::Path, file_type: &str) -> Result<String> {
     let file = File::open(path)
         .with_context(|| format!("Failed to open {} file: {}", file_type, path.display()))?;
 
@@ -834,31 +784,10 @@ fn validate_hex_file(path: &PathBuf, file_type: &str) -> Result<String> {
         .read_to_string(&mut content)
         .with_context(|| format!("Failed to read {} file content", file_type))?;
 
-    // Check if content looks like hex
-    let hex_chars: String = content.chars().filter(|c| !c.is_whitespace()).collect();
-    if hex_chars.is_empty() {
-        anyhow::bail!("{} file is empty", file_type);
-    }
-    if hex_chars.len() % 2 != 0 {
-        anyhow::bail!("{} file contains odd number of hex characters", file_type);
-    }
-    for ch in hex_chars.chars() {
-        if !ch.is_ascii_hexdigit() {
-            anyhow::bail!("{} file contains invalid hex character: {}", file_type, ch);
-        }
-    }
+    let bytes = read_hex_bytes(&content)
+        .with_context(|| format!("{file_type} file contains invalid hex"))?;
 
-    // Try to convert to bytes
-    let bytes = read_hex_bytes(&content);
-    if bytes.is_empty() {
-        anyhow::bail!("{} file converted to empty byte array", file_type);
-    }
-
-    Ok(format!(
-        "{} file is valid hex ({} bytes)",
-        file_type,
-        bytes.len()
-    ))
+    Ok(format!("{} file is valid hex ({} bytes)", file_type, bytes.len()))
 }
 
 fn info_command(input: PathBuf, verbose: bool, json: bool) -> Result<()> {
@@ -914,17 +843,19 @@ fn info_command(input: PathBuf, verbose: bool, json: bool) -> Result<()> {
         offset += size;
     }
 
-    // Check for common MP4 boxes and extract basic codec info
+    // Scan the full buffer for codec FourCCs — these are deeply nested
+    // inside moov/trak/mdia/minf/stbl/stsd and cannot be found by only
+    // examining top-level box types.
     let has_ftyp = boxes.iter().any(|b| b["type"] == "ftyp");
     let has_moov = boxes.iter().any(|b| b["type"] == "moov");
     let _has_mdat = boxes.iter().any(|b| b["type"] == "mdat");
     let is_valid_mp4 = has_ftyp && has_moov;
 
-    // Basic codec detection
-    let has_avc1 = boxes.iter().any(|b| b["type"] == "avc1");
-    let has_hvc1 = boxes.iter().any(|b| b["type"] == "hvc1");
-    let has_mp4a = boxes.iter().any(|b| b["type"] == "mp4a");
-    let has_vp09 = boxes.iter().any(|b| b["type"] == "vp09");
+    let has_avc1 = buffer.windows(4).any(|w| w == b"avc1");
+    let has_hvc1 = buffer.windows(4).any(|w| w == b"hvc1");
+    let has_mp4a = buffer.windows(4).any(|w| w == b"mp4a");
+    let has_vp09 = buffer.windows(4).any(|w| w == b"vp09");
+    let has_av01 = buffer.windows(4).any(|w| w == b"av01");
 
     let video_codec = if has_avc1 {
         "H.264/AVC"
@@ -932,6 +863,8 @@ fn info_command(input: PathBuf, verbose: bool, json: bool) -> Result<()> {
         "H.265/HEVC"
     } else if has_vp09 {
         "VP9"
+    } else if has_av01 {
+        "AV1"
     } else {
         "Unknown"
     };
