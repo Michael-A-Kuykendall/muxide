@@ -24,7 +24,7 @@ Thank you to all our sponsors who help keep Muxide free forever!
 **Muxide is free forever.** No paid tiers, no enterprise upsells, no bait-and-switch.
 
 Your sponsorship helps:
-- Add new codec support (VP9, more audio codecs)
+- Add new format and platform support
 - Fix bugs faster with dedicated support
 - Improve documentation and examples
 - Maintain compatibility with evolving standards
@@ -53,7 +53,7 @@ Your sponsorship helps:
 - Everything in Corporate Backers
 - Company logo in README (prominent placement)
 - Monthly 1:1 office hours
-- Direct input on roadmap
+- Input on roadmap priorities (maintainer retains final decision)
 - Early access to new features
 - Custom integration support
 

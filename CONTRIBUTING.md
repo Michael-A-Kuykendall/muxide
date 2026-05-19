@@ -48,9 +48,9 @@ Bug reports via GitHub Issues are welcome! Please include:
 - Expected vs actual behavior
 - Sample files if relevant (or instructions to generate them)
 
-## Code Style (for reference)
+## Code Style (if invited)
 
-If a contribution is discussed and approved:
+If invited:
 - Rust 2021 edition with `cargo fmt` and `cargo clippy`
 - Minimal runtime dependencies (only std and essential crates)
 - MSRV 1.74 compatibility
@@ -64,7 +64,7 @@ Any accepted work must align with:
 - **Pure Rust**: No unsafe, no FFI
 - **Strict validation**: Garbage in, error out
 - **Standards compliance**: Valid ISO-BMFF output
-- **MIT licensed**: No GPL contamination
+- **MIT OR Apache-2.0 licensed**: No GPL contamination
 
 ## Why This Model?
 
