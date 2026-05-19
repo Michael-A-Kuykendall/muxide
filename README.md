@@ -312,7 +312,7 @@ muxide info
 ```
 
 **Supported Codecs:**
-- **Video:** H.264 (AVC), H.265 (HEVC), AV1
+- **Video:** H.264 (AVC), H.265 (HEVC), AV1, VP9
 - **Audio:** AAC (all profiles), Opus
 
 **Features:**

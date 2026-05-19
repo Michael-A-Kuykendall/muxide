@@ -68,6 +68,7 @@
 ### 🗺️ **Roadmap Cleanup**
 - Removed duplicate sections and speculative AI-generated items ("Quantum-Safe Metadata", "Holographic Video Support", "Blockchain-Integrated Provenance", "Neural Codec Interfaces") that had no grounding in the project's mission.
 
+## 0.2.0 - Fragmented MP4 Multi-Codec & Safety
 
 ### 🎬 **Fragmented MP4 (fMP4) Multi-Codec Support**
 - **Multi-Codec fMP4**: Fragmented MP4 init+media segment support for **H.264, H.265/HEVC, AV1, and VP9**
@@ -111,7 +112,7 @@
 ## 0.1.2
 
 - **CLI Tool**: Complete command-line interface with progress bars, JSON output, and comprehensive muxing options
-- **Code Quality**: Comprehensive AI artifact cleanup, improved error handling patterns, and clippy compliance
+- **Code Quality**: Artifact cleanup, improved error handling patterns, and clippy compliance
 - **Documentation**: Enhanced README with complete feature documentation
 - **Release Polish**: Final production-ready codebase with all warnings addressed and comprehensive tests
 
@@ -127,7 +128,6 @@
 - **CLI Tool**: Command-line interface with progress bars, JSON output, and comprehensive options
 - **Invariant PPT Framework**: Property-based testing with contract verification
 - **Documentation**: Complete README, governance files (CODE_OF_CONDUCT, CONTRIBUTING, etc.), and roadmap
-- **License**: Simplified to MIT-only
 
 ## 0.1.0
 

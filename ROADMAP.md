@@ -70,6 +70,5 @@ Its mission is **simple muxing done right**: encoded frames in, playable MP4 out
 
 ## Governance
 - **Lead Maintainer:** Michael A. Kuykendall
-- Contributions are welcome via Pull Requests
+- Contributions follow the process described in [CONTRIBUTING.md](CONTRIBUTING.md)
 - The roadmap is set by the lead maintainer to preserve project vision
-- All PRs require maintainer review and approval

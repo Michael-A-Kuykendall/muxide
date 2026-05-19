@@ -22,7 +22,7 @@
 //! - ❌ Read or demux MP4 files
 //! - ❌ Fix bad timestamps (rejects invalid input)
 //! - ❌ DRM, encryption, or content protection
-//! - ❌ MKV, `WebM`, or other container formats
+//! - ❌ MKV, WebM, or other container formats
 //!
 //! See `docs/charter.md` and `docs/contract.md` for full invariants.
 //!
