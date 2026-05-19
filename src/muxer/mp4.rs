@@ -2244,9 +2244,10 @@ fn build_tkhd_box_with_id(track_id: u32, volume: u16, width: u32, height: u32) -
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&track_id.to_be_bytes());
-    payload.extend_from_slice(&0u32.to_be_bytes());
-    payload.extend_from_slice(&0u64.to_be_bytes());
-    payload.extend_from_slice(&0u64.to_be_bytes());
+    payload.extend_from_slice(&0u32.to_be_bytes()); // reserved
+    payload.extend_from_slice(&0u32.to_be_bytes()); // duration
+    payload.extend_from_slice(&0u32.to_be_bytes()); // reserved[0]
+    payload.extend_from_slice(&0u32.to_be_bytes()); // reserved[1]
     payload.extend_from_slice(&0u16.to_be_bytes());
     payload.extend_from_slice(&0u16.to_be_bytes());
     payload.extend_from_slice(&volume.to_be_bytes());
