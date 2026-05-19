@@ -27,10 +27,8 @@ Its mission is **simple muxing done right**: encoded frames in, playable MP4 out
 - ✅ **Production Validation**: FFmpeg/ffprobe compatibility verified
 - ✅ **Extensive Testing**: 200+ unit and integration tests, property-based tests
 - ✅ **PPT Framework**: Runtime invariant enforcement with contract tests
-- ✅ **CI/CD Integration**: Fast unit tests on every commit, comprehensive property tests on PRs
 - ✅ **Real-World Examples**: Working demos with fixture data
 - ✅ **CLI Tool**: Command-line interface with immediate developer utility
-- ✅ **CrabCamera Integration**: Used by production camera plugin (26+ stars)
 - ✅ **VP9 Production Readiness**: Full-range support, accurate color metadata
 - ✅ **API Modernization**: Unified MuxerBuilder, removed deprecated constructors
 - ✅ **Enhanced CLI Diagnostics**: Smart codec detection, better MP4 analysis
@@ -65,11 +63,10 @@ Its mission is **simple muxing done right**: encoded frames in, playable MP4 out
 ---
 
 ## Recent Achievements
-- **v0.1.4 Release**: Production integration with CrabCamera camera plugin
-- **Codebase Cleanup**: Removed all external crate references, focused on Muxide's unique value
-- **Quality Assurance**: Comprehensive testing suite with real-world validation
-- **Developer Experience**: Detailed error messages that make debugging 10x faster
-- **Ecosystem Growth**: Adopted by production applications with 26+ GitHub stars
+- **v0.2.3**: Fourth audit pass — stale docs, dead code, ANSI codes removed from error struct
+- **v0.2.2/v0.2.3**: Codebase audit — correctness fixes, DRY improvements, API cleanup
+- **Codebase Cleanup**: Removed external crate references, focused on core muxing functionality
+- **Quality Assurance**: Comprehensive testing with property-based tests and contract verification
 
 ## Governance
 - **Lead Maintainer:** Michael A. Kuykendall

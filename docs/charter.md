@@ -1,6 +1,8 @@
 # Muxide Charter (v0.1.0)
 
-This document started as a “freeze the slice ladder” charter. The crate has since evolved beyond the original minimal scope; this charter is kept **aligned with the published v0.1.0 implementation** so the repository does not contain contradictory statements.
+This document records the original design goals and constraints for the v0.1.0 release.
+The crate has since evolved; this charter is kept **aligned with the published v0.1.0 implementation**
+so the repository does not contain contradictory statements.
 
 ## Goal
 
@@ -10,7 +12,7 @@ Deliver a **recording‑oriented MP4 writer** in pure Rust that:
 2. Supports **H.264/H.265/AV1/VP9 video** and optional **AAC/Opus audio**.
 3. Enforces **monotonic timestamps**, fails fast on invalid inputs, and supports B-frames when callers provide explicit PTS/DTS.
 4. Produces files that play correctly in major players (QuickTime, VLC, Windows Movies & TV, Chromium) without requiring external tools.
-5. Adheres to the **Slice‑Gated Engineering Doctrine**: work is delivered in small, verifiable slices with objective gates, and no refactoring or extra features are introduced until v0.1.0 is complete.
+5. Delivers each feature in small, verifiable increments with objective acceptance gates.
 
 ## Definition of Done
 
@@ -18,7 +20,7 @@ A v0.1.0 release is considered complete when all of the following are true:
 
 1. A public API crate (`muxide`) is published to crates.io with a minimum major version of 0.1.0.
 2. The crate can write a short MP4 file (with H.264 video and, optionally, AAC audio) that plays back in the player matrix without errors.
-3. All slices in the v0.1.0 slice ladder have passed their gates and no TODOs remain for the v0.1.0 scope.
+3. All planned features for v0.1.0 have passed their acceptance gates and no TODOs remain for the v0.1.0 scope.
 4. The API is documented with examples and invariants; any missing features are explicitly marked as such.
 
 ## Non‑Goals
@@ -37,7 +39,7 @@ The following are explicitly out of scope for v0.1.0:
 * **Bundle size:** No more than 500 KB of compiled code (excluding dependencies) should be added for the v0.1.0 release.  This encourages a minimal dependency footprint.
 * **Static API:** The public API defined in `docs/contract.md` must remain unchanged throughout the v0.1.0 cycle unless a breaking change is justified and approved.
 * **No unsafe code in the public API:** Unsafe may be used internally if necessary, but public functions and types must remain safe.
-* **Gate enforcement:** Each slice must have a clearly defined acceptance gate (typically a test or example) that can be run with a single command and results in a pass/fail outcome.
+* **Gate enforcement:** Each feature must have a clearly defined acceptance gate (typically a test or example) that can be run with a single command and results in a pass/fail outcome.
 
 ## Truth Anchors
 
@@ -47,14 +49,13 @@ During development, the following will serve as sources of truth and correctness
 2. **Player matrix**: Files produced by Muxide must play without errors in QuickTime (macOS), VLC (multi‑platform), Windows Movies & TV (Windows 11), and Chromium (cross‑platform).  Automated tests will run the `mp4dump` tool or player probes to ensure structural correctness where possible.
 3. **API invariants**: The contract document defines invariants (e.g. monotonic PTS, one video track per file) that must hold; violations must result in a clear error, not silent correction.
 
-## Roles & Responsibilities
+## Governance
 
-* **Planner (you)**: Prepares the slice ladder and monitors gate results.
-* **Implementer (AI)**: Executes slices, writes code and tests, and reports gate outcomes.  The implementer must respect the slice definitions and not expand scope.
+Contributions and roadmap decisions are managed by the lead maintainer.
 
 ## Versions
 
 * **v0.1.0**: MP4 muxing with H.264/H.265/AV1 video and optional AAC/Opus audio; single video and audio track; blocking IO. B-frames are supported when the caller supplies PTS/DTS explicitly.
 * **v0.2.0+**: Multiple containers, async writers, additional streaming modes, and performance improvements.
 
-Once this charter is committed, it should remain unchanged for the duration of the v0.1.0 cycle.  Future releases may introduce a new charter.
+Once this charter is committed, it remains a historical record for the v0.1.0 cycle.  Future releases may introduce a new charter.

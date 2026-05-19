@@ -112,20 +112,20 @@
 
 - **CLI Tool**: Complete command-line interface with progress bars, JSON output, and comprehensive muxing options
 - **Code Quality**: Comprehensive AI artifact cleanup, improved error handling patterns, and clippy compliance
-- **Documentation**: Enhanced README with professional presentation and complete feature documentation
-- **Release Polish**: Final production-ready codebase with all warnings addressed and comprehensive testing
+- **Documentation**: Enhanced README with complete feature documentation
+- **Release Polish**: Final production-ready codebase with all warnings addressed and comprehensive tests
 
 ## 0.1.1
 
 - **AAC Profile Support**: Complete implementation of all 6 AAC profiles (LC, Main, SSR, LTP, HE, HEv2)
-- **World-Class Error Handling**: Comprehensive ADTS validation with detailed diagnostics, hex dumps, and recovery suggestions
+- **ADTS Error Handling**: Comprehensive ADTS validation with detailed diagnostics, hex dumps, and recovery suggestions
 - **MP4E-Compatible APIs**: Added `new_with_fragment()`, `flush()`, `set_create_time()`, `set_language()` methods
 - **Metadata Support**: Title, creation time, and language metadata in MP4 files
 - **HEVC/H.265 Support**: Annex B format with VPS/SPS/PPS configuration
 - **AV1 Support**: OBU stream format with Sequence Header OBU configuration
 - **Opus Support**: Raw Opus packets with 48kHz sample rate
 - **CLI Tool**: Command-line interface with progress bars, JSON output, and comprehensive options
-- **Invariant PPT Framework**: Property-based testing with 86%+ code coverage
+- **Invariant PPT Framework**: Property-based testing with contract verification
 - **Documentation**: Complete README, governance files (CODE_OF_CONDUCT, CONTRIBUTING, etc.), and roadmap
 - **License**: Simplified to MIT-only
 
