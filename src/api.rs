@@ -17,7 +17,8 @@ use std::io::Write;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoCodec {
     /// H.264/AVC video codec.  Only the AVC Annex B stream format is
-    /// currently supported.  B‑frames are not permitted in v0.
+    /// currently supported.  For streams with B-frames, use
+    /// [`Muxer::write_video_with_dts`](crate::api::Muxer::write_video_with_dts).
     H264,
     /// H.265/HEVC video codec. Annex B stream format with VPS/SPS/PPS.
     /// Requires first keyframe to contain VPS, SPS, and PPS NALs.
@@ -598,7 +599,8 @@ pub struct Muxer<Writer> {
 /// to be educational—they explain what went wrong and how to fix it.
 #[derive(Debug)]
 pub enum MuxerError {
-    /// Video configuration is missing.  In v0, a video track is required.
+    /// Video configuration is missing.  A video track is required;
+    /// call `.video()` on `MuxerBuilder` before calling `.build()`.
     MissingVideoConfig,
     /// Low-level IO error while writing the container.
     Io(std::io::Error),

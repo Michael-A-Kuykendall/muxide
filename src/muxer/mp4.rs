@@ -198,12 +198,12 @@ pub enum AdtsErrorKind {
 
 impl fmt::Display for AdtsValidationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Severity indicator
-        let severity_icon = match self.severity {
-            ErrorSeverity::Error => "🚨",
-            ErrorSeverity::Warning => "⚠️",
+        // Severity prefix
+        let severity = match self.severity {
+            ErrorSeverity::Error => "[error]",
+            ErrorSeverity::Warning => "[warning]",
         };
-        write!(f, "{} ", severity_icon)?;
+        write!(f, "{severity} ")?;
 
         // Main error message
         match &self.kind {
@@ -220,8 +220,8 @@ impl fmt::Display for AdtsValidationError {
                     "ADTS syncword missing at byte {}: expected 0xFFF in first 12 bits",
                     self.byte_offset
                 )?;
-                if let (Some(_expected), Some(found)) = (&self.expected, &self.found) {
-                    write!(f, " (expected {}, found {})", _expected, found)?;
+                if let (Some(expected), Some(found)) = (&self.expected, &self.found) {
+                    write!(f, " (expected {expected}, found {found})")?;
                 }
             }
             AdtsErrorKind::InvalidFrameLength => {
@@ -230,8 +230,8 @@ impl fmt::Display for AdtsValidationError {
                     "ADTS frame length invalid at byte {}: ",
                     self.byte_offset
                 )?;
-                if let (Some(_expected), Some(found)) = (&self.expected, &self.found) {
-                    write!(f, "expected {}, found {}", _expected, found)?;
+                if let (Some(expected), Some(found)) = (&self.expected, &self.found) {
+                    write!(f, "expected {expected}, found {found}")?;
                 }
                 write!(
                     f,
@@ -245,7 +245,7 @@ impl fmt::Display for AdtsValidationError {
                     self.byte_offset
                 )?;
                 if let (Some(expected), Some(found)) = (&self.expected, &self.found) {
-                    write!(f, "expected header length {}, found {}", expected, found)?;
+                    write!(f, "expected header length {expected}, found {found}")?;
                 }
                 write!(f, " (check protection_absent flag)")?;
             }
@@ -255,15 +255,15 @@ impl fmt::Display for AdtsValidationError {
                     "ADTS MPEG version invalid at byte {}: ",
                     self.byte_offset
                 )?;
-                if let (Some(_expected), Some(found)) = (&self.expected, &self.found) {
-                    write!(f, "expected {}, found {}", _expected, found)?;
+                if let (Some(expected), Some(found)) = (&self.expected, &self.found) {
+                    write!(f, "expected {expected}, found {found}")?;
                 }
                 write!(f, " (only MPEG-4 AAC is supported)")?;
             }
             AdtsErrorKind::InvalidLayer => {
                 write!(f, "ADTS layer field invalid at byte {}: ", self.byte_offset)?;
-                if let (Some(_expected), Some(found)) = (&self.expected, &self.found) {
-                    write!(f, "expected {}, found {}", _expected, found)?;
+                if let (Some(expected), Some(found)) = (&self.expected, &self.found) {
+                    write!(f, "expected {expected}, found {found}")?;
                 }
                 write!(f, " (must be 0 for AAC)")?;
             }
@@ -273,8 +273,8 @@ impl fmt::Display for AdtsValidationError {
                     "ADTS sample rate index invalid at byte {}: ",
                     self.byte_offset
                 )?;
-                if let (Some(_expected), Some(found)) = (&self.expected, &self.found) {
-                    write!(f, "expected 0-12, found {}", found)?;
+                if let (Some(_), Some(found)) = (&self.expected, &self.found) {
+                    write!(f, "expected 0-12, found {found}")?;
                 }
                 write!(f, " (valid range is 0-12 corresponding to 96000-7350 Hz)")?;
             }
@@ -284,44 +284,47 @@ impl fmt::Display for AdtsValidationError {
                     "ADTS channel configuration invalid at byte {}: ",
                     self.byte_offset
                 )?;
-                if let (Some(_expected), Some(found)) = (&self.expected, &self.found) {
-                    write!(f, "expected 1-7, found {}", found)?;
+                if let (Some(_), Some(found)) = (&self.expected, &self.found) {
+                    write!(f, "expected 1-7, found {found}")?;
                 }
                 write!(f, " (valid range is 1-7 for mono/stereo configurations)")?;
             }
             AdtsErrorKind::CrcMismatch => {
-                write!(f, "ADTS CRC mismatch at byte {}: ", self.byte_offset)?;
-                write!(f, "frame data doesn't match CRC checksum")?;
+                write!(
+                    f,
+                    "ADTS CRC mismatch at byte {}: frame data doesn't match CRC checksum",
+                    self.byte_offset
+                )?;
             }
         }
 
         // Add hex dump if available
         if let Some(hex) = &self.hex_dump {
-            write!(f, "\n  Hex dump: {}", hex)?;
+            write!(f, "\n  Hex dump: {hex}")?;
         }
 
         // Add suggestion if available
         if let Some(suggestion) = &self.suggestion {
-            write!(f, "\n  Suggestion: {}", suggestion)?;
+            write!(f, "\n  Suggestion: {suggestion}")?;
         }
 
         // Add code example if available
         if let Some(code) = &self.code_example {
-            write!(f, "\n  Code example: {}", code)?;
+            write!(f, "\n  Code example: {code}")?;
         }
 
-        // Add technical details in verbose mode (if requested)
+        // Add technical details in verbose mode (alternate format flag)
         if f.alternate() {
             if let Some(tech) = &self.technical_details {
-                write!(f, "\n🔍 Technical details: {}", tech)?;
+                write!(f, "\n  Technical details: {tech}")?;
             }
         }
 
         // Show related errors
         if !self.related_errors.is_empty() {
-            write!(f, "\n\n📋 Related errors in this frame:")?;
+            write!(f, "\n  Related errors in this frame:")?;
             for (i, related) in self.related_errors.iter().enumerate() {
-                write!(f, "\n  {}. {}", i + 1, related)?;
+                write!(f, "\n    {}. {related}", i + 1)?;
             }
         }
 

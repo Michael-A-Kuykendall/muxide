@@ -57,7 +57,7 @@ cargo add muxide
 use muxide::api::{MuxerBuilder, VideoCodec};
 
 let mut muxer = MuxerBuilder::new(file)
-    .video(VideoCodec::H264, 1920, 1080, 30.0)?
+    .video(VideoCodec::H264, 1920, 1080, 30.0)
     .build()?;
 
 // Write your encoded frames...
@@ -112,9 +112,9 @@ If input violates the contract, Muxide **fails fast** with explicit errors—no 
 | | B-frames | Explicit PTS/DTS support |
 | | Fragmented MP4 | For DASH/HLS streaming |
 | | Metadata | Title, creation time, language |
-| **Quality** | World-class errors | Detailed diagnostics, hex dumps, JSON output |
+| **Quality** | Detailed error reporting | Hex dumps, JSON output, actionable messages |
 | | Production tested | FFmpeg compatibility verified |
-| | Comprehensive testing | 80+ tests, property-based validation |
+| | Comprehensive testing | 200+ tests, property-based validation |
 
 ### Design Principles
 
@@ -125,7 +125,7 @@ If input violates the contract, Muxide **fails fast** with explicit errors—no 
 | 🧵 **Thread-safe** | `Send + Sync` when writer is |
 | ✅ **Well-tested** | Unit, integration, property tests |
 | 📜 **Permissive license** | Dual-licensed: MIT OR Apache-2.0 |
-| 🚨 **Developer-friendly** | Exceptional error messages make debugging 10x faster |
+| � **Developer-friendly** | Detailed error context with hex dumps and actionable suggestions |
 
 > **Note:** `no_std` is not supported. Muxide requires `std::io::Write`.
 
@@ -134,7 +134,7 @@ If input violates the contract, Muxide **fails fast** with explicit errors—no 
 ## Quick Start
 
 ```rust
-use muxide::api::{MuxerBuilder, VideoCodec, AudioCodec, Metadata};
+use muxide::api::{AacProfile, AudioCodec, MuxerBuilder, Metadata, VideoCodec};
 use std::fs::File;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -142,7 +142,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let mut muxer = MuxerBuilder::new(file)
         .video(VideoCodec::H264, 1920, 1080, 30.0)
-        .audio(AudioCodec::Aac, 48000, 2)
+        .audio(AudioCodec::Aac(AacProfile::Lc), 48000, 2)
         .with_metadata(Metadata::new().with_title("My Recording"))
         .with_fast_start(true)
         .build()?;
@@ -346,41 +346,13 @@ Muxide is intentionally **focused**. It does **not**:
 Muxide is a great fit for:
 
 - 🎥 **Screen recorders** — capture → encode → mux → ship
-- 📹 **Camera apps** — webcam/IP camera recording pipelines (e.g., CrabCamera integration)
+- 📹 **Camera apps** — webcam/IP camera recording pipelines
 - 🎬 **Video editors** — export timeline to MP4
 - 📡 **Streaming** — generate fMP4 segments for DASH/HLS
 - 🏭 **Embedded systems** — single binary, no external deps
 - 🔬 **Scientific apps** — deterministic, reproducible output
 
 Probably **not** a fit if you need encoding, demuxing, or legacy codecs (MPEG-2, etc.).
-
----
-
-## Example: Fast-Start Proof
-
-The `faststart_proof` example demonstrates a structural MP4 invariant:
-
-- Two MP4 files are generated from the same encoded inputs
-- One with fast-start enabled, one without
-- No external tools are used at any stage
-
-```text
-$ cargo run --example faststart_proof --release
-
-output: recording_faststart.mp4
-    layout invariant: moov before mdat = YES
-
-output: recording_normal.mp4
-    layout invariant: moov before mdat = NO
-```
-
-When served over HTTP, the fast-start file can begin playback without waiting for the full download (player behavior varies, but the layout property is deterministic).
-
-This example is intentionally minimal:
-
-- Timestamps are generated in-code
-- No B-frames/DTS paths are exercised
-- The goal is container layout correctness, not encoding quality
 
 ---
 
@@ -395,7 +367,9 @@ Muxide is designed for **minimal overhead**. Muxing should never be your bottlen
 | 1000 video + 1500 audio | 457 µs | 2.2M frames/sec |
 | 100 4K frames (~6.5 MB) | 14 ms | **464 MB/sec** |
 
-> **Note:** Benchmarks are based on development hardware. Encoding is typically the bottleneck—muxing overhead is negligible. Run `cargo bench` for your environment (dev-only benchmarks available).AVC
+> **Note:** Benchmarks are based on development hardware. Encoding is typically the bottleneck—muxing overhead is negligible. Run `cargo bench` for your environment (dev-only benchmarks available).
+
+### H.264/AVC
 
 - **Format:** Annex B (start codes: `00 00 00 01` or `00 00 01`)
 - **First keyframe must contain:** SPS and PPS NAL units
