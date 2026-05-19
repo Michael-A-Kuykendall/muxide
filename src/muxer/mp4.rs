@@ -1434,7 +1434,7 @@ fn build_audio_stsd_box(audio: &Mp4AudioTrack) -> Vec<u8> {
     let sample_entry_box = match audio.codec {
         AudioCodec::Aac(_) => build_mp4a_box(audio),
         AudioCodec::Opus => build_opus_box(audio),
-        AudioCodec::None => build_mp4a_box(audio), // Fallback, shouldn't happen
+        AudioCodec::None => unreachable!("audio stsd box built with AudioCodec::None"),
     };
 
     let mut payload = Vec::new();

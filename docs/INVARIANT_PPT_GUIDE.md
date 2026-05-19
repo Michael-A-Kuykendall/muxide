@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project uses **Predictive Property-Based Testing (PPT)** combined with **runtime invariant enforcement**. This methodology is preferred over traditional TDD for high-change, AI-assisted development.
+This project uses **Predictive Property-Based Testing (PPT)** combined with **runtime invariant enforcement**. This methodology is preferred over traditional TDD for projects with rapidly evolving logic.
 
 ## Core Philosophy
 
