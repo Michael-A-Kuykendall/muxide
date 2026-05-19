@@ -1,6 +1,16 @@
 # Changelog
 
-## 0.2.0 (January 1, 2026) - Fragmented MP4 Multi-Codec + Audit Hardening
+## 0.2.1 (May 19, 2026) - Bug Fix & CLI Fragmented MP4
+
+### 🐛 **Critical Bug Fix**
+- **`tkhd` duration overflow**: The non-fragmented muxer was writing the `duration` field in version-0 Track Header boxes as `u64` (8 bytes) instead of `u32` (4 bytes) per ISO 14496-12 §8.3.2. This inserted 4 extra bytes into every `tkhd` box, shifting the matrix, width, and height fields to wrong offsets. Players would infer an incorrect Sample Aspect Ratio (e.g. `24:5` instead of `1:1`), causing stretched or squished video playback. The fragmented path was already correct; this aligns the non-fragmented path to match. Reported by @peteralm80, confirmed by @zkvsky (issue #5).
+
+### ✨ **CLI Fragmented MP4 (H.264 + VP9)**
+- The `--fragmented` flag in the `mux` subcommand now works for H.264 and VP9 inputs. The CLI extracts SPS/PPS automatically from the Annex B bitstream for H.264 and VP9 config from the first keyframe for VP9, then writes a spec-correct `ftyp + moov + moof + mdat` fragmented MP4. H.265 and AV1 fragmented output require additional parameter-set arguments not yet exposed in the CLI; those will continue to use the library API directly.
+
+### 🗺️ **Roadmap Cleanup**
+- Removed duplicate sections and speculative AI-generated items ("Quantum-Safe Metadata", "Holographic Video Support", "Blockchain-Integrated Provenance", "Neural Codec Interfaces") that had no grounding in the project's mission.
+
 
 ### 🎬 **Fragmented MP4 (fMP4) Multi-Codec Support**
 - **Multi-Codec fMP4**: Fragmented MP4 init+media segment support for **H.264, H.265/HEVC, AV1, and VP9**
