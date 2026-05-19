@@ -122,7 +122,6 @@ impl SampleTables {
             })
             .collect();
 
-        let _ = sample_count;
         Self {
             durations,
             sizes,

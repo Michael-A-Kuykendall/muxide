@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.2.3 (May 21, 2026) - Second Audit Pass: Documentation, DRY, and Residual Bugs
+
+### 🐛 **Bug Fixes**
+- **`encode_video()` would panic on empty input instead of returning an error**: `encode_video()` called `is_keyframe(data)` before `write_video()`'s empty-data guard. If `data` was empty, the `assert_invariant!(!data.is_empty())` inside `is_keyframe()` would panic rather than return `MuxerError::EmptyVideoFrame`. Fixed by adding an early empty-data guard at the top of `encode_video()` so `is_keyframe()` is never called with empty data.
+- **`MuxStats.duration_ms` was always 0 in CLI JSON output**: The `duration_ms` field was initialized to 0 and never populated. Fixed by switching from `muxer.finish()` to `muxer.finish_with_stats()` and deriving the value from the returned `MuxerStats`.
+
+### 🧹 **Removed Vapor / Dead Code**
+- **Dead `let _ = sample_count;`** in `SampleTables::from_samples`: `sample_count` was already used for `Vec::with_capacity`; the suppression binding at the end of the function was pure dead weight.
+- **Removed unused `use crate::assert_invariant;`** from `api.rs` top-level imports (the macro is now referenced inline with `use` inside `is_keyframe()`).
+
+### ✨ **Documentation**
+- **`MuxerBuilder` struct doc was stale**: Said "B-frame support, fragmented MP4 will be added in future slices" — both are implemented. Replaced with an accurate summary of all supported codecs and output modes.
+- **`build()` comment was stale**: Said "In v0, we perform minimal validation... Future releases may relax this." Removed development-phase language.
+- **`finish_in_place()` doc leaked internal artifact**: "a minimal MP4 header that can be inspected by the slice 02 tests" removed; replaced with an accurate description.
+- **`finish()` and `finish_with_stats()` had no doc comments.** Both now documented.
+- **`finish_in_place_with_stats()` doc improved**: Now cross-references `finish_in_place()`.
+- **`write_audio()` doc only mentioned AAC**: Now explicitly covers Opus packets too.
+- **`encode_video()` and `encode_audio()` docs were terse single-liners**: Expanded to explain the auto-timestamp behaviour, when to use these vs. the explicit-PTS methods, and the meaning of the `samples` parameter.
+- **`MuxerConfig` fields undocumented**: All six fields (`width`, `height`, `framerate`, `audio`, `metadata`, `fast_start`) now have field-level doc comments.
+- **`MuxerStats` fields undocumented**: All four fields now have field-level doc comments.
+- **`Metadata::new()`, `with_title()`, `with_creation_time()`** had no doc comments. Added.
+- **`MuxerConfig::new()`, `with_audio()`, `with_metadata()`, `with_fast_start()`** had no doc comments. Added.
+
+### 🔀 **Code Organisation**
+- **`simple_api_works` test was in `thread_safety_tests` module**: Moved to the `tests` module where it belongs. The `make_h264_keyframe()` helper moved with it.
+- **`test_poisoned_lock_paths_are_handled` renamed** in `invariant_ppt.rs`: The test was renamed from a prior RwLock-poisoning test. Now named `test_invariant_log_records_and_clears` which accurately describes what it does. Stale comment removed.
+
+### ♻️ **Refactor**
+- **Magic `3000` in `fragmented.rs` replaced** with a named constant `FALLBACK_FRAME_DURATION_TICKS` (90 000 Hz timescale ticks for one frame at 30 fps). Both uses in `flush_segment` and `build_trun` now reference the constant.
+- **Duplicate DTS span calculation extracted** in `FragmentedMuxer`: `ready_to_flush()` and `current_fragment_duration_ms()` both computed the same span. The shared logic is now in a private `buffered_duration_ms()` helper. Both public methods delegate to it.
+
 ## 0.2.2 (May 20, 2026) - Codebase Audit: Correctness & Idiomatic Rust
 
 ### 🐛 **Bug Fixes**

@@ -577,9 +577,12 @@ fn mux_command(
         eprintln!("Finalizing MP4...");
     }
 
-    muxer.finish().with_context(|| "Failed to finalize MP4")?;
+    let muxer_stats = muxer
+        .finish_with_stats()
+        .with_context(|| "Failed to finalize MP4")?;
 
-    let stats = progress.finish()?;
+    let mut stats = progress.finish()?;
+    stats.duration_ms = (muxer_stats.duration_secs * 1000.0) as u64;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&stats)?);

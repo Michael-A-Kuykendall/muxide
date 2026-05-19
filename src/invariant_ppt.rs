@@ -108,11 +108,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_poisoned_lock_paths_are_handled() {
+    fn test_invariant_log_records_and_clears() {
         clear_invariant_log();
 
-        // With thread_local RefCell, we can't poison the lock like with RwLock
-        // Instead, test that the functions work correctly
         assert_invariant!(true, "poisoned invariant");
 
         contract_test("poisoned", &["poisoned invariant"]);

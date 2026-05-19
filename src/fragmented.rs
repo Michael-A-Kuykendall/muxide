@@ -112,6 +112,12 @@ struct FragmentSample {
     is_sync: bool,
 }
 
+/// Fallback single-frame duration in 90 kHz timescale ticks (1 frame @ 30 fps).
+///
+/// Used when only one sample is available and the real duration cannot be inferred
+/// from adjacent timestamps. Equivalent to `90000 / 30 = 3000`.
+const FALLBACK_FRAME_DURATION_TICKS: u64 = 3000;
+
 /// A fragmented MP4 muxer for streaming applications.
 #[derive(Debug)]
 pub struct FragmentedMuxer {
@@ -214,7 +220,7 @@ impl FragmentedMuxer {
                 let avg_duration = duration_total / (samples.len() as u64 - 1);
                 self.base_media_decode_time = last.dts + avg_duration;
             } else {
-                self.base_media_decode_time = last.dts + 3000; // Fallback: 1 frame at 30fps
+                self.base_media_decode_time = last.dts + FALLBACK_FRAME_DURATION_TICKS; // 1 frame at 30fps
             }
         }
 
@@ -223,31 +229,28 @@ impl FragmentedMuxer {
 
     /// Check if we have enough samples to make a fragment.
     pub fn ready_to_flush(&self) -> bool {
-        if self.samples.is_empty() {
-            return false;
-        }
-
         if self.samples.len() < 2 {
             return false;
         }
-
-        let first_dts = self.samples[0].dts;
-        let last_dts = self.samples.last().unwrap().dts;
-        let duration_ticks = last_dts.saturating_sub(first_dts);
-        let duration_ms = duration_ticks * 1000 / self.config.timescale as u64;
-
-        duration_ms >= self.config.fragment_duration_ms as u64
+        self.buffered_duration_ms() >= self.config.fragment_duration_ms as u64
     }
 
     /// Get current fragment duration in milliseconds.
     pub fn current_fragment_duration_ms(&self) -> u64 {
+        self.buffered_duration_ms()
+    }
+
+    /// Duration spanned by the buffered samples, in milliseconds.
+    ///
+    /// Returns 0 when fewer than two samples are buffered (no inter-sample
+    /// interval is available yet).
+    fn buffered_duration_ms(&self) -> u64 {
         if self.samples.len() < 2 {
             return 0;
         }
         let first_dts = self.samples[0].dts;
         let last_dts = self.samples.last().unwrap().dts;
-        let duration_ticks = last_dts.saturating_sub(first_dts);
-        duration_ticks * 1000 / self.config.timescale as u64
+        last_dts.saturating_sub(first_dts) * 1000 / self.config.timescale as u64
     }
 }
 
@@ -855,7 +858,7 @@ fn build_trun(samples: &[FragmentSample], data_offset: u32) -> Vec<u8> {
             // Use previous duration for last sample
             (sample.dts - samples[i - 1].dts) as u32
         } else {
-            3000 // Default: 1 frame at 30fps
+            FALLBACK_FRAME_DURATION_TICKS as u32 // 1 frame at 30fps
         };
         payload.extend_from_slice(&duration.to_be_bytes());
 

@@ -5,7 +5,6 @@
 //! modules. The API defined here intentionally exposes only the
 //! capabilities promised by the charter and contract documents.
 
-use crate::assert_invariant;
 use crate::codec::av1::is_av1_keyframe;
 use crate::codec::common::AnnexBNalIter;
 use crate::codec::vp9::is_vp9_keyframe;
@@ -127,13 +126,21 @@ impl std::str::FromStr for AudioCodec {
 }
 
 /// High-level muxer configuration intended for simple integrations (e.g. CrabCamera).
+///
+/// Build a [`MuxerBuilder`] from this config with [`into_builder`](MuxerConfig::into_builder).
 #[derive(Debug, Clone)]
 pub struct MuxerConfig {
+    /// Frame width in pixels.
     pub width: u32,
+    /// Frame height in pixels.
     pub height: u32,
+    /// Target frame rate (frames per second).
     pub framerate: f64,
+    /// Optional audio track configuration. `None` for video-only output.
     pub audio: Option<AudioTrackConfig>,
+    /// Optional metadata (title, creation time, language) to embed in the MP4.
     pub metadata: Option<Metadata>,
+    /// Whether to write `moov` before `mdat` (fast-start / web-playback mode).
     pub fast_start: bool,
 }
 
@@ -149,15 +156,18 @@ pub struct Metadata {
 }
 
 impl Metadata {
+    /// Create a new, empty `Metadata` instance. All fields are `None`.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Set the recording title (displayed in most media players).
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());
         self
     }
 
+    /// Set the creation timestamp as seconds since Unix epoch (1970-01-01 UTC).
     pub fn with_creation_time(mut self, unix_timestamp: u64) -> Self {
         self.creation_time = Some(unix_timestamp);
         self
@@ -180,6 +190,9 @@ impl Metadata {
 }
 
 impl MuxerConfig {
+    /// Create a new config with the given video dimensions and frame rate.
+    /// Audio is disabled by default; use [`with_audio`](Self::with_audio) to enable it.
+    /// Fast-start is enabled by default.
     pub fn new(width: u32, height: u32, framerate: f64) -> Self {
         Self {
             width,
@@ -191,6 +204,7 @@ impl MuxerConfig {
         }
     }
 
+    /// Configure an audio track. Pass [`AudioCodec::None`] to clear a previously set track.
     pub fn with_audio(mut self, codec: AudioCodec, sample_rate: u32, channels: u16) -> Self {
         if codec == AudioCodec::None {
             self.audio = None;
@@ -204,11 +218,13 @@ impl MuxerConfig {
         self
     }
 
+    /// Attach metadata (title, creation time, language) to the output file.
     pub fn with_metadata(mut self, metadata: Metadata) -> Self {
         self.metadata = Some(metadata);
         self
     }
 
+    /// Enable or disable fast-start (moov before mdat). Enabled by default.
     pub fn with_fast_start(mut self, enabled: bool) -> Self {
         self.fast_start = enabled;
         self
@@ -247,19 +263,39 @@ impl MuxerConfig {
 /// Summary statistics returned when finishing a mux.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MuxerStats {
+    /// Number of video frames written.
     pub video_frames: u64,
+    /// Number of audio frames written.
     pub audio_frames: u64,
+    /// Total stream duration in seconds (PTS of last frame + last frame duration).
     pub duration_secs: f64,
+    /// Total bytes written to the underlying writer.
     pub bytes_written: u64,
 }
 
-/// Builder for constructing a new muxer instance.
+/// Builder for constructing a [`Muxer`] or [`FragmentedMuxer`] instance.
 ///
-/// The builder follows a fluent API pattern: each method returns a
-/// modified builder, allowing method chaining.  Only the configuration
-/// necessary for the initial v0 release is included.  Additional
-/// configuration (such as B‑frame support, fragmented MP4 or other
-/// containers) will be added in future slices.
+/// Follows a fluent (method-chaining) pattern. All methods take `self` by value
+/// and return a modified builder, so configuration is always complete before
+/// [`build`](MuxerBuilder::build) or [`new_with_fragment`](MuxerBuilder::new_with_fragment)
+/// is called.
+///
+/// # Supported codecs
+///
+/// Video: H.264, H.265/HEVC, AV1, VP9  
+/// Audio: AAC (all ADTS profiles), Opus
+///
+/// # B-frame support
+///
+/// Use [`Muxer::write_video_with_dts`] to supply explicit DTS when frames
+/// are not presented in decode order.
+///
+/// # Fragmented MP4
+///
+/// Call [`new_with_fragment`](MuxerBuilder::new_with_fragment) instead of
+/// [`build`](MuxerBuilder::build). Codec-specific parameter sets (SPS/PPS/VPS
+/// for H.264/H.265, sequence header for AV1, config for VP9) must be provided
+/// via the corresponding `with_*` methods before calling `new_with_fragment`.
 pub struct MuxerBuilder<Writer> {
     /// The underlying writer to which container data will be written.
     writer: Writer,
@@ -369,9 +405,8 @@ impl<Writer> MuxerBuilder<Writer> {
     where
         Writer: Write,
     {
-        // In v0, we perform minimal validation: video configuration must be
-        // present.  Future releases may relax this to allow audio‑only
-        // streams.
+        // Video configuration is required. Audio is optional and omitting it
+        // produces a video-only MP4 (no audio track box in moov).
         let (codec, width, height, framerate) = self.video.ok_or(MuxerError::MissingVideoConfig)?;
         let video_track = VideoTrackConfig {
             codec,
@@ -913,8 +948,10 @@ impl<Writer: Write> Muxer<Writer> {
 
     /// Write an audio frame to the container.
     ///
-    /// `pts` is the presentation timestamp in seconds.  The `data` slice
-    /// contains the encoded audio frame (an AAC ADTS frame).
+    /// `pts` is the presentation timestamp in seconds. `data` must be a valid
+    /// encoded audio frame for the configured codec — an AAC ADTS frame when
+    /// using [`AudioCodec::Aac`], or a raw Opus packet when using
+    /// [`AudioCodec::Opus`].
     /// Audio timestamps must be non-decreasing and must not precede the first video frame.
     pub fn write_audio(&mut self, pts: f64, data: &[u8]) -> Result<(), MuxerError> {
         if self.finished {
@@ -980,7 +1017,21 @@ impl<Writer: Write> Muxer<Writer> {
     }
 
     /// Simple video encoding method.
+    ///
+    /// Writes a video frame with automatic keyframe detection and duration-based
+    /// timestamps. The `duration_ms` parameter is the frame's display duration in
+    /// milliseconds; the muxer accumulates timestamps internally so you do not need
+    /// to track PTS manually. Keyframe status is detected from the bitstream.
+    ///
+    /// Use this for simple sequential encoding. For streams with B-frames, or
+    /// where you need explicit timestamp control, use [`write_video`](Self::write_video)
+    /// or [`write_video_with_dts`](Self::write_video_with_dts).
     pub fn encode_video(&mut self, data: &[u8], duration_ms: u32) -> Result<(), MuxerError> {
+        if data.is_empty() {
+            return Err(MuxerError::EmptyVideoFrame {
+                frame_index: self.video_frame_count,
+            });
+        }
         let pts = self.current_video_pts;
         let is_keyframe = self.is_keyframe(data);
         self.write_video(pts, data, is_keyframe)?;
@@ -989,6 +1040,14 @@ impl<Writer: Write> Muxer<Writer> {
     }
 
     /// Simple audio encoding method.
+    ///
+    /// Writes an audio frame using sample-count-based timestamps. `samples` is
+    /// the number of PCM samples in this frame (e.g. 1024 for AAC-LC at 48 kHz,
+    /// 960 or 1920 for Opus). Timestamps are accumulated internally from
+    /// `samples / sample_rate`.
+    ///
+    /// Use this for simple sequential encoding. For explicit timestamp control,
+    /// use [`write_audio`](Self::write_audio).
     pub fn encode_audio(&mut self, data: &[u8], samples: u32) -> Result<(), MuxerError> {
         let Some(audio_track) = &self.audio_track else {
             return Err(MuxerError::AudioNotConfigured);
@@ -1002,7 +1061,9 @@ impl<Writer: Write> Muxer<Writer> {
 
     /// Helper to detect if a video frame is a keyframe.
     fn is_keyframe(&self, data: &[u8]) -> bool {
-        // INV-100: Video frame data must not be empty
+        use crate::assert_invariant;
+        // INV-100: Video frame data must not be empty.
+        // Callers must check for empty data before calling this method.
         assert_invariant!(
             !data.is_empty(),
             "INV-100: Video frame data must not be empty",
@@ -1028,15 +1089,19 @@ impl<Writer: Write> Muxer<Writer> {
         }
     }
 
-    /// Finalise the container and flush any buffered data.
+    /// Finalise the container in place.
     ///
-    /// In the current slice this writes the `ftyp`/`moov` boxes, resulting
-    /// in a minimal MP4 header that can be inspected by the slice 02 tests.
+    /// Writes the `ftyp` and `moov` boxes and any remaining buffered data.
+    /// The muxer is marked finished; further writes return
+    /// [`MuxerError::AlreadyFinished`].
     pub fn finish_in_place(&mut self) -> Result<(), MuxerError> {
         self.finish_in_place_with_stats().map(|_| ())
     }
 
-    /// Finalise the container and return muxing statistics.
+    /// Finalise the container in place and return muxing statistics.
+    ///
+    /// Like [`finish_in_place`](Self::finish_in_place) but also returns
+    /// [`MuxerStats`] (frame counts, duration, bytes written).
     pub fn finish_in_place_with_stats(&mut self) -> Result<MuxerStats, MuxerError> {
         if self.finished {
             return Err(MuxerError::AlreadyFinished);
@@ -1063,11 +1128,18 @@ impl<Writer: Write> Muxer<Writer> {
         })
     }
 
+    /// Consume the muxer, finalise the container, and return.
+    ///
+    /// Equivalent to [`finish_in_place`](Self::finish_in_place) but takes
+    /// ownership, ensuring the muxer cannot be used after finalisation.
     pub fn finish(mut self) -> Result<(), MuxerError> {
         self.finish_in_place()
     }
 
-    /// Finalise the container and return muxing statistics.
+    /// Consume the muxer, finalise the container, and return [`MuxerStats`].
+    ///
+    /// Equivalent to [`finish_in_place_with_stats`](Self::finish_in_place_with_stats)
+    /// but takes ownership.
     pub fn finish_with_stats(mut self) -> Result<MuxerStats, MuxerError> {
         self.finish_in_place_with_stats()
     }
@@ -1098,27 +1170,11 @@ mod thread_safety_tests {
         assert_send::<MuxerBuilder<std::fs::File>>();
         assert_sync::<MuxerBuilder<std::fs::File>>();
     }
+}
 
-    #[test]
-    fn simple_api_works() -> Result<(), MuxerError> {
-        let mut buffer = Vec::new();
-        let mut muxer = MuxerBuilder::new(&mut buffer)
-            .video(VideoCodec::H264, 1920, 1080, 30.0)
-            .audio(AudioCodec::Aac(AacProfile::Lc), 48000, 2)
-            .build()?;
-
-        // Test video encoding with a valid keyframe
-        let video_data = make_h264_keyframe();
-        muxer.encode_video(&video_data, 33)?; // 33ms
-
-        // Test audio encoding
-        let audio_data = vec![0xff, 0xf1, 0x4c, 0x80, 0x01, 0x3f, 0xfc, 0xaa, 0xbb]; // ADTS
-        muxer.encode_audio(&audio_data, 1024)?; // 1024 samples
-
-        muxer.finish()?;
-        assert!(!buffer.is_empty());
-        Ok(())
-    }
+#[cfg(test)]
+mod tests {
+    use super::*;
 
     /// Helper to create a valid H.264 keyframe with SPS/PPS
     fn make_h264_keyframe() -> Vec<u8> {
@@ -1136,11 +1192,25 @@ mod thread_safety_tests {
         ]);
         data
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    #[test]
+    fn simple_api_works() -> Result<(), MuxerError> {
+        let mut buffer = Vec::new();
+        let mut muxer = MuxerBuilder::new(&mut buffer)
+            .video(VideoCodec::H264, 1920, 1080, 30.0)
+            .audio(AudioCodec::Aac(AacProfile::Lc), 48000, 2)
+            .build()?;
+
+        let video_data = make_h264_keyframe();
+        muxer.encode_video(&video_data, 33)?;
+
+        let audio_data = vec![0xff, 0xf1, 0x4c, 0x80, 0x01, 0x3f, 0xfc, 0xaa, 0xbb]; // ADTS
+        muxer.encode_audio(&audio_data, 1024)?;
+
+        muxer.finish()?;
+        assert!(!buffer.is_empty());
+        Ok(())
+    }
 
     #[test]
     fn metadata_new_creates_empty_metadata() {
