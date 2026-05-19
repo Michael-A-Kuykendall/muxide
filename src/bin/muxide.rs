@@ -34,8 +34,8 @@ fn read_hex_bytes(contents: &str) -> Result<Vec<u8>> {
 
 /// Muxide - Minimal-dependency pure-Rust MP4 muxer
 ///
-/// A professional-grade MP4 muxer designed for recording applications.
-/// Supports H.264/H.265/AV1/VP9 video and AAC/Opus audio with world-class error handling.
+/// A pure-Rust MP4 muxer for recording applications.
+/// Supports H.264/H.265/AV1/VP9 video and AAC/Opus audio.
 #[derive(Parser)]
 #[command(name = "muxide")]
 #[command(version, about, long_about)]

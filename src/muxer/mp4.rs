@@ -12,7 +12,7 @@ use crate::codec::vp9::{extract_vp9_config, Vp9Config};
 const MOVIE_TIMESCALE: u32 = 1000;
 /// Track/media timebase used for converting `pts` seconds into MP4 sample deltas.
 ///
-/// v0.1.0 uses a 90 kHz media timescale (common for MP4/H.264 workflows).
+/// Muxide uses a 90 kHz media timescale (common for MP4/H.264 workflows).
 pub const MEDIA_TIMESCALE: u32 = 90_000;
 
 /// Video codec configuration extracted from the first keyframe.
@@ -28,7 +28,7 @@ pub enum VideoConfig {
     Vp9(Vp9Config),
 }
 
-/// Minimal MP4 writer used by the early slices.
+/// Internal MP4 container writer.
 pub struct Mp4Writer<Writer> {
     writer: Writer,
     video_codec: VideoCodec,
@@ -81,8 +81,7 @@ impl SampleTables {
         samples_per_chunk: u32,
         fallback_duration: Option<u32>,
     ) -> Self {
-        let sample_count = samples.len() as u32;
-        let mut durations = Vec::with_capacity(sample_count as usize);
+        let mut durations = Vec::with_capacity(samples.len());
         for (idx, sample) in samples.iter().enumerate() {
             let duration = sample.duration.unwrap_or_else(|| {
                 if idx == samples.len() - 1 {
@@ -580,7 +579,9 @@ impl<Writer: Write> Mp4Writer<Writer> {
         // Process audio data based on codec
         let sample_data = match audio_track.codec {
             AudioCodec::Aac(profile) => {
-                // INV-020: AAC profile must be supported
+                // INV-020: AAC profile must be one of the currently supported variants.
+                // This guard fires if a new AacProfile variant is added without updating
+                // the processing code here.
                 assert_invariant!(
                     matches!(
                         profile,
@@ -1075,7 +1076,7 @@ enum TrackKind {
 
 #[allow(clippy::result_large_err)]
 fn adts_to_raw(frame: &[u8]) -> Result<&[u8], AdtsValidationError> {
-    // Enhanced hex dump with ASCII and color highlighting
+    // Plain hex dump suitable for both terminal display and JSON serialization.
     let create_hex_dump = |offset: usize, len: usize| -> String {
         let start = offset.saturating_sub(8).min(frame.len());
         let end = (offset + len + 8).min(frame.len());
@@ -1087,13 +1088,11 @@ fn adts_to_raw(frame: &[u8]) -> Result<&[u8], AdtsValidationError> {
         for (i, &byte) in slice.iter().enumerate() {
             let global_offset = start + i;
 
-            // Highlight error byte with red and asterisk
+            // Mark the error byte with an asterisk
             if global_offset == offset {
-                hex.push_str(&format!("\x1b[91m{:02x}*\x1b[0m ", byte));
-            } else if global_offset >= offset && global_offset < offset + len {
-                hex.push_str(&format!("\x1b[93m{:02x}\x1b[0m ", byte)); // Yellow for context
+                hex.push_str(&format!("{:02x}* ", byte));
             } else {
-                hex.push_str(&format!("{:02x} ", byte));
+                hex.push_str(&format!("{:02x}  ", byte));
             }
 
             // ASCII representation
@@ -1102,13 +1101,7 @@ fn adts_to_raw(frame: &[u8]) -> Result<&[u8], AdtsValidationError> {
             } else {
                 '.'
             };
-            if global_offset == offset {
-                ascii.push_str(&format!("\x1b[91m{}\x1b[0m", ascii_char));
-            } else if global_offset >= offset && global_offset < offset + len {
-                ascii.push_str(&format!("\x1b[93m{}\x1b[0m", ascii_char));
-            } else {
-                ascii.push(ascii_char);
-            }
+            ascii.push(ascii_char);
 
             // Line breaks every 16 bytes
             if (i + 1) % 16 == 0 {
@@ -1119,8 +1112,11 @@ fn adts_to_raw(frame: &[u8]) -> Result<&[u8], AdtsValidationError> {
 
         if !ascii.is_empty() {
             // Pad hex to align with ASCII
-            while hex.chars().filter(|&c| c != '\x1b').count() % (16 * 3) != 0 {
-                hex.push(' ');
+            let pad = 16 - (ascii.len() % 16);
+            if pad < 16 {
+                for _ in 0..pad {
+                    hex.push_str("    ");
+                }
             }
             hex.push_str(&format!(" |{}|", ascii));
         }
@@ -1228,15 +1224,9 @@ fn adts_to_raw(frame: &[u8]) -> Result<&[u8], AdtsValidationError> {
         });
     }
 
-    // Profile/Object type (bits 16-17)
-    let profile = (frame[2] >> 6) & 0x03;
-    let _profile_name = match profile {
-        0 => "Main",
-        1 => "LC (Low Complexity)",
-        2 => "SSR (Scalable Sample Rate)",
-        3 => "LTP (Long Term Prediction)",
-        _ => "Unknown",
-    };
+    // Profile/Object type (bits 16-17) — extracted but not validated here;
+    // profile compatibility is enforced by the caller via AudioCodec::Aac.
+    let _profile = (frame[2] >> 6) & 0x03;
 
     // Sample rate index (bits 18-21)
     let sample_rate_idx = (frame[2] >> 2) & 0x0F;
