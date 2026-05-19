@@ -3,7 +3,7 @@
 Muxide is a minimal-dependency, pure-Rust MP4 muxer.
 Its mission is **simple muxing done right**: encoded frames in, playable MP4 out.
 
-## Current Status: v0.2.1 ✅
+## Current Status: v0.2.3 ✅
 
 ### Core Features (v0.1.0 – v0.2.1)
 - ✅ H.264/AVC video muxing (Annex B format)
@@ -21,12 +21,12 @@ Its mission is **simple muxing done right**: encoded frames in, playable MP4 out
 
 ### Advanced Features (v0.1.1-0.1.5)
 - ✅ **Comprehensive AAC Support**: All profiles (LC, Main, SSR, LTP, HE, HEv2)
-- ✅ **World-Class Error Handling**: Detailed diagnostics, hex dumps, JSON output, actionable suggestions
+- ✅ **Detailed ADTS Error Reporting**: Severity indicators, hex dumps, JSON serialisation
 - ✅ **Metadata Support**: Creation time, language encoding (ISO 639-2/T)
 - ✅ **API Compatibility**: Builder pattern with fluent API methods
 - ✅ **Production Validation**: FFmpeg/ffprobe compatibility verified
-- ✅ **Extensive Testing**: 80+ unit tests, property-based tests, 88% coverage
-- ✅ **PPT Framework**: Runtime invariant enforcement with 13 contract tests
+- ✅ **Extensive Testing**: 200+ unit and integration tests, property-based tests
+- ✅ **PPT Framework**: Runtime invariant enforcement with contract tests
 - ✅ **CI/CD Integration**: Fast unit tests on every commit, comprehensive property tests on PRs
 - ✅ **Real-World Examples**: Working demos with fixture data
 - ✅ **CLI Tool**: Command-line interface with immediate developer utility

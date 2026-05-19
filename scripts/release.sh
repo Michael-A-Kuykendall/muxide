@@ -1,26 +1,33 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Release script for Muxide
 # Usage: ./scripts/release.sh <version>
+#
+# Bumps Cargo.toml version, prompts for CHANGELOG entry, then commits,
+# tags, and pushes to origin/main.
 
-set -e
+set -euo pipefail
 
-if [ $# -ne 1 ]; then
+if [[ $# -ne 1 ]]; then
     echo "Usage: $0 <version>"
-    echo "Example: $0 0.1.3"
+    echo "Example: $0 0.2.4"
     exit 1
 fi
 
 VERSION=$1
 
-echo "🚀 Preparing release $VERSION"
+echo "Preparing release $VERSION"
 
 # Update version in Cargo.toml
-sed -i "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+# sed -i '' works on both macOS (BSD sed) and Linux (GNU sed).
+if sed --version 2>&1 | grep -q GNU; then
+    sed -i "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+else
+    sed -i '' "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+fi
 
-# Update CHANGELOG.md (you'll need to add the entry manually)
-echo "📝 Please update CHANGELOG.md with the new version notes"
-echo "   Then press Enter to continue..."
-read
+# Prompt for CHANGELOG entry
+echo "Update CHANGELOG.md with the v$VERSION release notes, then press Enter to continue..."
+read -r
 
 # Commit version bump
 git add Cargo.toml CHANGELOG.md
@@ -31,9 +38,5 @@ git tag "v$VERSION"
 git push origin main
 git push origin "v$VERSION"
 
-echo "✅ Release $VERSION tagged and pushed!"
-echo "   GitHub Actions will now:"
-echo "   - Build and publish binaries to the release"
-echo "   - Publish to crates.io"
-echo ""
-echo "   Check the Actions tab for progress."
+echo "Release $VERSION tagged and pushed."
+echo "Check the Actions tab for build and publish progress."

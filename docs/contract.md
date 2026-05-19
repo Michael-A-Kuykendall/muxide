@@ -4,7 +4,7 @@ This document defines the public API contract and invariants for the v0.2.x seri
 
 ## High‑Level API
 
-Muxide exposes a builder pattern for creating a `Muxer` instance that writes an MP4 container to an arbitrary writer (implementing `std::io::Write`).  The API is intentionally minimal; configuration options beyond those described here are not available in v0.1.0.
+Muxide exposes a builder pattern for creating a `Muxer` instance that writes an MP4 container to an arbitrary writer (implementing `std::io::Write`).
 
 ### Types
 
@@ -33,18 +33,18 @@ Muxide exposes a builder pattern for creating a `Muxer` instance that writes an 
 
 Muxide converts incoming timestamps in seconds (`pts: f64`) into a fixed internal media timebase.
 
-- The v0.1.0 implementation uses a **90 kHz** media timescale for track timing (a common convention for MP4/H.264).
+- Muxide uses a **90 kHz** media timescale for track timing (a common convention for MP4/H.264).
 - The media timebase is shared between video and audio when both tracks are present.
 
 ### MuxerBuilder Methods
 
 * `new(writer: Writer) -> Self` — Constructs a builder for the given writer.  The writer is consumed by the builder and later moved into the `Muxer`.
 
-* `video(self, codec: VideoCodec, width: u32, height: u32, framerate: f64) -> Self` — Configures the video track.  Exactly one call to `video` is required for v0.1.0.  The frame rate must be positive and reasonable (e.g. between 1 and 120).  Non‑integer frame rates (e.g. 29.97) are permitted.
+* `video(self, codec: VideoCodec, width: u32, height: u32, framerate: f64) -> Self` — Configures the video track.  The frame rate must be positive and in the range (0, 120].  Non‑integer frame rates (e.g. 29.97) are permitted.
 
 * `audio(self, codec: AudioCodec, sample_rate: u32, channels: u16) -> Self` — Configures an optional audio track.  At most one call to `audio` may be made.  Audio is optional; if omitted, the file will contain only video.  If `codec` is `None`, the sample rate and channels are ignored.
 
-* `build(self) -> Result<Muxer<Writer>, MuxerError>` — Validates the configuration and returns a `Muxer` instance on success.  In v0.1.0 the following validation rules apply:
+* `build(self) -> Result<Muxer<Writer>, MuxerError>` — Validates the configuration and returns a `Muxer` instance on success.  Validation rules:
   1. A video track must have been configured.  Otherwise a `MuxerError::MissingVideoConfig` is returned.
   2. If `AudioCodec::None` is selected, the muxer behaves as video-only.
 
@@ -148,4 +148,4 @@ mux.finish()?;
 
 ## Stability
 
-The API described here must not change in any breaking way during the v0.1.x series.  Additional methods may be added, but existing signatures and invariants must remain stable.  Breaking changes require a new major version or a new charter.
+The API described here must not change in any breaking way within the v0.2.x series.  Additional methods may be added, but existing signatures and invariants must remain stable.  Breaking changes require a new major version.

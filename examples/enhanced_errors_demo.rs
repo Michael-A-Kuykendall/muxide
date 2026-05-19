@@ -14,11 +14,10 @@ fn read_hex_bytes(contents: &str) -> Vec<u8> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🚀 Demonstrating WORLD-CLASS ADTS Error Messages in Muxide");
-    println!("===========================================================");
-    println!(
-        "✨ New Features: Severity indicators, enhanced hex dumps, JSON output, error chaining"
-    );
+    // Demonstrates the ADTS error reporting system:
+    // - Severity indicators, hex dumps, JSON serialisation, verbose mode
+    println!("ADTS Error Reporting Demo");
+    println!("=========================");
     println!();
 
     let sink = Cursor::new(Vec::<u8>::new());
@@ -31,8 +30,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let frame0 = read_hex_bytes(include_str!("../fixtures/video_samples/frame0_key.264"));
     muxer.write_video(0.0, &frame0, true)?;
 
-    println!("📋 Example 1: Frame Too Short (User-Friendly Mode)");
-    println!("---------------------------------------------------");
+    println!("Example 1: Frame Too Short");
+    println!("--------------------------");
     let invalid_adts = &[0x00, 0x01, 0x02];
     match muxer.write_audio(0.0, invalid_adts) {
         Ok(_) => println!("Unexpectedly succeeded"),
@@ -40,8 +39,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!();
-    println!("🔧 Example 2: Invalid Syncword (Verbose Technical Mode + JSON)");
-    println!("-------------------------------------------------------------");
+    println!("Example 2: Invalid Syncword (verbose + JSON)");
+    println!("--------------------------------------------");
     // Reset muxer for next test
     let sink2 = Cursor::new(Vec::<u8>::new());
     let mut muxer2 = MuxerBuilder::new(sink2)
@@ -56,10 +55,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => {
             println!("{}", e);
             println!();
-            println!("🔍 Verbose Technical Details (for developers):");
+            println!("Verbose technical details:");
             println!("{:#}", e); // Use alternate formatting for verbose mode
             println!();
-            println!("📄 JSON Output (for tools/programmatic handling):");
+            println!("JSON output:");
             // Check if this is a detailed ADTS error
             if let MuxerError::InvalidAdtsDetailed {
                 error: ref adts_err,
@@ -76,18 +75,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!();
-    println!("📊 Error Message Components:");
-    println!("• 🚨 Severity indicators (Error vs Warning)");
-    println!("• 🎯 Specific validation failure type");
-    println!("• 📍 Exact byte offset in frame");
-    println!("• 🔍 Enhanced hex dump with ASCII and color highlighting");
-    println!("• 💡 Actionable recovery suggestions");
-    println!("• 🛠️  Technical details for developers");
-    println!("• 📄 JSON serialization for tools");
-    println!("• 🔗 Error chaining for multiple issues");
-    println!("• 🎨 User-friendly vs verbose modes");
-    println!();
-    println!("🚀 This error system makes debugging AAC/MP4 issues 10x faster!");
+    println!("Error message components:");
+    println!("  Severity indicator (Error vs Warning)");
+    println!("  Validation failure type and byte offset");
+    println!("  Hex dump of the offending frame bytes");
+    println!("  Actionable recovery suggestion");
+    println!("  Technical details (visible in verbose mode with {{:#}})");
+    println!("  JSON serialisation for programmatic handling");
+    println!("  Error chaining for frames with multiple issues");
 
     Ok(())
 }
