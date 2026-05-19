@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{BufReader, Read};
+use std::io::{BufReader, Read, Write};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
@@ -9,6 +9,8 @@ use serde::Serialize;
 
 use muxide::api::{AacProfile, AudioCodec, Metadata, Muxer, MuxerBuilder, VideoCodec};
 use muxide::assert_invariant;
+use muxide::codec::{h264 as h264_codec, vp9 as vp9_codec};
+use muxide::fragmented::{FragmentConfig, FragmentedMuxer};
 
 fn read_hex_bytes(contents: &str) -> Vec<u8> {
     let hex: String = contents.chars().filter(|c| !c.is_whitespace()).collect();
@@ -298,7 +300,7 @@ fn mux_command(
     sample_rate: Option<u32>,
     channels: Option<u8>,
     fragmented: bool,
-    _fragment_duration_ms: u32,
+    fragment_duration_ms: u32,
     title: Option<String>,
     language: Option<String>,
     creation_time: Option<String>,
@@ -390,11 +392,105 @@ fn mux_command(
     let audio_path = audio.clone();
 
     // Create output file
-    let output_file = File::create(&output)
+    let mut output_file = File::create(&output)
         .with_context(|| format!("Failed to create output file: {}", output.display()))?;
 
     if fragmented {
-        anyhow::bail!("Fragmented MP4 is not yet supported in the CLI. Use the library API with FragmentedMuxer.");
+        if video_path.is_none() {
+            anyhow::bail!("--video is required for fragmented MP4");
+        }
+        let (vid_w, vid_h) = match (width, height) {
+            (Some(w), Some(h)) => (w, h),
+            _ => anyhow::bail!("--width and --height are required for fragmented MP4"),
+        };
+        let codec = video_codec.unwrap_or(VideoCodec::H264);
+        if matches!(codec, VideoCodec::H265 | VideoCodec::Av1) {
+            anyhow::bail!(
+                "Fragmented {} via CLI requires VPS/SPS/PPS params not yet exposed here. Use the library API with FragmentedMuxer directly.",
+                codec
+            );
+        }
+
+        // Read input
+        let frag_file = File::open(video_path.as_ref().unwrap())
+            .with_context(|| "Failed to open video file")?;
+        let mut reader = BufReader::new(frag_file);
+        let mut hex_content = String::new();
+        reader.read_to_string(&mut hex_content)?;
+        let frame_data = read_hex_bytes(&hex_content);
+
+        // Build FragmentConfig and convert frame to segment-ready format
+        let (segment_data, config) = match codec {
+            VideoCodec::H264 => {
+                let avc = h264_codec::extract_avc_config(&frame_data)
+                    .unwrap_or_else(h264_codec::default_avc_config);
+                let avcc = h264_codec::annexb_to_avcc(&frame_data);
+                let cfg = FragmentConfig {
+                    width: vid_w,
+                    height: vid_h,
+                    timescale: 90000,
+                    fragment_duration_ms,
+                    sps: avc.sps,
+                    pps: avc.pps,
+                    vps: None,
+                    av1_sequence_header: None,
+                    vp9_config: None,
+                };
+                (avcc, cfg)
+            }
+            VideoCodec::Vp9 => {
+                let vp9_cfg = vp9_codec::extract_vp9_config(&frame_data);
+                let cfg = FragmentConfig {
+                    width: vid_w,
+                    height: vid_h,
+                    timescale: 90000,
+                    fragment_duration_ms,
+                    sps: vec![],
+                    pps: vec![],
+                    vps: None,
+                    av1_sequence_header: None,
+                    vp9_config: vp9_cfg,
+                };
+                (frame_data.clone(), cfg)
+            }
+            _ => unreachable!(),
+        };
+
+        let is_sync = match codec {
+            VideoCodec::H264 => h264_codec::is_h264_keyframe(&frame_data),
+            VideoCodec::Vp9 => vp9_codec::is_vp9_keyframe(&frame_data).unwrap_or(false),
+            _ => true,
+        };
+
+        let mut fmp4 = FragmentedMuxer::new(config);
+
+        let init = fmp4.init_segment();
+        output_file
+            .write_all(&init)
+            .with_context(|| "Failed to write fMP4 init segment")?;
+        progress.update_bytes(init.len() as u64);
+
+        fmp4.write_video(0, 0, &segment_data, is_sync)
+            .map_err(|e| anyhow::anyhow!("Failed to write video sample: {e}"))?;
+        progress.update_video_frame();
+
+        if let Some(segment) = fmp4.flush_segment() {
+            progress.update_bytes(segment.len() as u64);
+            output_file
+                .write_all(&segment)
+                .with_context(|| "Failed to write fMP4 media segment")?;
+        }
+
+        let stats = progress.finish()?;
+        if json {
+            println!("{}", serde_json::to_string_pretty(&stats)?);
+        } else {
+            println!("✅ Fragmented MP4 muxing complete!");
+            println!("   Video frames: {}", stats.video_frames);
+            println!("   Total size: {} bytes", stats.total_bytes);
+            println!("   Output: {}", output.display());
+        }
+        return Ok(());
     }
 
     // Build muxer configuration

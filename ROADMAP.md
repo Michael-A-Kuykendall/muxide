@@ -3,9 +3,9 @@
 Muxide is a minimal-dependency, pure-Rust MP4 muxer.
 Its mission is **simple muxing done right**: encoded frames in, playable MP4 out.
 
-## Current Status: v0.2.0 - Quality & Completeness ✅
+## Current Status: v0.2.1 ✅
 
-### Core Features (v0.1.0)
+### Core Features (v0.1.0 – v0.2.1)
 - ✅ H.264/AVC video muxing (Annex B format)
 - ✅ H.265/HEVC video muxing with VPS/SPS/PPS extraction
 - ✅ AV1 video muxing (OBU format)
@@ -13,10 +13,11 @@ Its mission is **simple muxing done right**: encoded frames in, playable MP4 out
 - ✅ AAC audio muxing (ADTS format)
 - ✅ Opus audio muxing (48kHz raw packets)
 - ✅ Fast-start layout (moov before mdat)
-- ✅ **Fragmented MP4 for DASH/HLS streaming** (H.264, H.265, AV1, VP9)
+- ✅ **Fragmented MP4 for DASH/HLS streaming** (H.264, H.265, AV1, VP9) — library + CLI
 - ✅ B-frame support via explicit PTS/DTS
 - ✅ Property-based test suite
 - ✅ Published to crates.io
+- ✅ **Bug fix**: `tkhd` version-0 duration was written as `u64` instead of `u32`, corrupting width/height in non-fragmented MP4 (issue #5)
 
 ### Advanced Features (v0.1.1-0.1.5)
 - ✅ **Comprehensive AAC Support**: All profiles (LC, Main, SSR, LTP, HE, HEv2)
@@ -34,51 +35,26 @@ Its mission is **simple muxing done right**: encoded frames in, playable MP4 out
 - ✅ **API Modernization**: Unified MuxerBuilder, removed deprecated constructors
 - ✅ **Enhanced CLI Diagnostics**: Smart codec detection, better MP4 analysis
 
-## Next Goals (v0.2.0) - Developer Experience & Performance
-
-### v0.1.6 (Q2 2026) - Release Hygiene & Alignment
-- [ ] **Git Release Tags**: Add retroactive tags for v0.1.0 through v0.1.5 for better version tracking
-- [x] **Dependency Clarity**: Update README.md to clarify "minimal runtime dependencies" (no FFmpeg/C binaries, but Rust crates are used)
-- [ ] **Audit Alignment**: Address Muxide-specific findings from CODE_AUDIT_REPORT.md (e.g., API ergonomics) in v0.2.0 planning
-- [ ] **CLI Fragmented MP4**: Implement fragmented MP4 support in CLI tool
-- [ ] **Documentation Polish**: Complete API docs, better examples, troubleshooting guide
-
-## Next Goals (v0.2.0) - Developer Experience & Performance
-
-### v0.1.6 (Q2 2026) - Release Hygiene & Alignment
-- [ ] **Git Release Tags**: Add retroactive tags for v0.1.0 through v0.1.5 for better version tracking
-- [x] **Dependency Clarity**: Update README.md to clarify "minimal runtime dependencies" (no FFmpeg/C binaries, but Rust crates are used)
-- [ ] **Audit Alignment**: Address Muxide-specific findings from CODE_AUDIT_REPORT.md (e.g., API ergonomics) in v0.2.0 planning
-- [ ] **CLI Fragmented MP4**: Implement fragmented MP4 support in CLI tool
-- [ ] **Documentation Polish**: Complete API docs, better examples, troubleshooting guide
+## Next Goals (v0.3.0+)
 
 ### High Priority
 - [ ] **Performance Benchmarks**: Establish baseline performance metrics and optimization targets
-- [ ] **SIMD Optimizations**: Performance improvements for hot paths in frame processing
-- [ ] **AI-Powered Muxing Hints**: Optional ML-based suggestions for optimal muxing parameters based on input analysis
-- [ ] **Quantum-Safe Metadata**: Experimental support for post-quantum cryptography in metadata encryption
-
-### Medium Priority
-- [ ] **Enhanced Documentation**: More real-world examples and tutorials
+- [ ] **Enhanced Documentation**: More real-world examples, tutorials, and API docs
 - [ ] **Async I/O Support**: Optional tokio-based async operations for large file handling
 - [ ] **WebAssembly Target**: Browser-based MP4 muxing for web applications
-- [ ] **Holographic Video Support**: Early exploration of 3D/holographic MP4 extensions for VR/AR content
-- [ ] **Blockchain-Integrated Provenance**: Immutable muxing logs via blockchain for content authenticity
+- [ ] **CLI H.265/AV1 Fragmented MP4**: Expose VPS/SPS/PPS/sequence-header params in CLI for HEVC and AV1 fragmented output
 
-### Lower Priority
+### Medium Priority
 - [ ] **Chapter Markers**: Metadata support for navigation points in long videos
+- [ ] **DASH Manifest Generation**: Automatic streaming manifest creation alongside fMP4 output
 - [ ] **Streaming Optimizations**: Further improvements for DASH/HLS low-latency streaming
-- [ ] **Neural Codec Interfaces**: Prototype integration with emerging AI-driven codecs for adaptive quality
 
-## Future Possibilities (v0.3.0+)
+## Future Possibilities
 - [ ] **Hardware-accelerated Muxing**: GPU-assisted frame processing and I/O
 - [ ] **Plugin System**: Extensible architecture for custom codecs and formats
-- [ ] **Advanced Metadata**: Chapters, subtitles, custom metadata formats
-- [ ] **DASH Manifest Generation**: Automatic streaming manifest creation
-- [ ] **Cloud Storage Integration**: Direct upload to S3, GCS, Azure Blob Storage
+- [ ] **Advanced Metadata**: Subtitles, custom metadata formats
 - [ ] **Real-time Streaming**: RTMP/RTSP output for live broadcasting
 - [ ] **Container Extensions**: Support for MKV, AVI, MOV formats
-- [ ] **Analytics Export**: Performance metrics and usage statistics
 
 ## Non-Goals
 - **Encoding/decoding** - Muxide is a muxer only, bring your own codec
