@@ -14,4 +14,4 @@ Helpful bug reports and community members are acknowledged in release notes.
 
 ---
 
-*Want to be listed here? See [CONTRIBUTING.md](CONTRIBUTING.md) for how to get involved.*
+*Contributors are acknowledged in release notes when applicable.*
