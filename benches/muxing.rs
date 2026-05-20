@@ -2,7 +2,32 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use muxide::api::{AacProfile, AudioCodec, MuxerBuilder, VideoCodec};
 use std::io::Cursor;
 
+fn decode_hex_fixture(contents: &str) -> Vec<u8> {
+    let hex: String = contents.chars().filter(|c| !c.is_whitespace()).collect();
+    let mut out = Vec::with_capacity(hex.len() / 2);
+    for i in (0..hex.len()).step_by(2) {
+        let byte = u8::from_str_radix(&hex[i..i + 2], 16).expect("valid fixture hex");
+        out.push(byte);
+    }
+    out
+}
+
+fn h264_keyframe() -> Vec<u8> {
+    decode_hex_fixture(include_str!("../fixtures/video_samples/frame0_key.264"))
+}
+
+fn h264_pframe() -> Vec<u8> {
+    decode_hex_fixture(include_str!("../fixtures/video_samples/frame1_p.264"))
+}
+
+fn aac_frame() -> Vec<u8> {
+    decode_hex_fixture(include_str!("../fixtures/audio_samples/frame0.aac.adts"))
+}
+
 fn bench_h264_muxing(c: &mut Criterion) {
+    let keyframe = h264_keyframe();
+    let pframe = h264_pframe();
+
     c.bench_function("mux_1000_h264_frames", |b| {
         b.iter(|| {
             let mut buffer = Vec::new();
@@ -12,19 +37,28 @@ fn bench_h264_muxing(c: &mut Criterion) {
                 .build()
                 .expect("build muxer");
 
-            // Simulate 1000 frames (using dummy data for benchmark)
-            let dummy_frame = vec![0u8; 10000]; // ~10KB per frame
             for i in 0..1000 {
                 let pts = i as f64 / 30.0;
-                let _ = muxer.write_video(pts, &dummy_frame, i % 30 == 0);
+                let (frame, is_keyframe) = if i == 0 || i % 30 == 0 {
+                    (&keyframe, true)
+                } else {
+                    (&pframe, false)
+                };
+                muxer
+                    .write_video(pts, frame, is_keyframe)
+                    .expect("write video sample");
             }
-            let _ = muxer.finish();
+            muxer.finish().expect("finish muxer");
             black_box(buffer);
         });
     });
 }
 
 fn bench_h264_with_audio(c: &mut Criterion) {
+    let keyframe = h264_keyframe();
+    let pframe = h264_pframe();
+    let audio = aac_frame();
+
     c.bench_function("mux_1000_h264_audio_frames", |b| {
         b.iter(|| {
             let mut buffer = Vec::new();
@@ -35,14 +69,19 @@ fn bench_h264_with_audio(c: &mut Criterion) {
                 .build()
                 .expect("build muxer");
 
-            let dummy_video = vec![0u8; 10000];
-            let dummy_audio = vec![0u8; 1000];
             for i in 0..1000 {
                 let pts = i as f64 / 30.0;
-                let _ = muxer.write_video(pts, &dummy_video, i % 30 == 0);
-                let _ = muxer.write_audio(pts, &dummy_audio);
+                let (frame, is_keyframe) = if i == 0 || i % 30 == 0 {
+                    (&keyframe, true)
+                } else {
+                    (&pframe, false)
+                };
+                muxer
+                    .write_video(pts, frame, is_keyframe)
+                    .expect("write video sample");
+                muxer.write_audio(pts, &audio).expect("write audio sample");
             }
-            let _ = muxer.finish();
+            muxer.finish().expect("finish muxer");
             black_box(buffer);
         });
     });

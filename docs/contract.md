@@ -91,7 +91,7 @@ Muxide itself is implemented as a single-threaded writer; thread-safety here ref
 ## Invariants & Correctness Rules
 
 1. **Monotonic Timestamps:** For each track, presentation timestamps (`pts`) must be non‑negative and strictly increasing (video) or non‑decreasing (audio). If this invariant is violated, the operation must fail.
-2. **Keyframes:** The first video frame must be a keyframe containing SPS and PPS.  Subsequent keyframes must be marked via the `is_keyframe` flag.  Files produced without proper keyframe signalling will not play back correctly and are considered incorrect.
+2. **Keyframes:** The first video frame must be a keyframe and must include the codec configuration required by that codec: SPS/PPS for H.264, VPS/SPS/PPS for H.265, a Sequence Header OBU for AV1, and valid frame header parameters for VP9. Subsequent keyframes must be marked via the `is_keyframe` flag. Files produced without proper keyframe signalling will not play back correctly and are considered incorrect.
 3. **Single Video Track:** Exactly one video track is supported.  Multiple video tracks or the absence of a video track is an error.
 4. **Single Audio Track:** At most one audio track is supported.  Adding multiple audio tracks is not allowed.
 5. **B‑frames:** Streams with reordering (B-frames) are supported when callers use `write_video_with_dts()`:
@@ -121,7 +121,7 @@ For streams without B-frames, use `write_video()` which assumes PTS == DTS.
 ## Examples (Pseudo‑Code)
 
 ```
-use muxide::api::{MuxerBuilder, VideoCodec, AudioCodec};
+use muxide::api::{AacProfile, AudioCodec, MuxerBuilder, VideoCodec};
 use std::fs::File;
 
 // Create an output file
@@ -130,7 +130,7 @@ let file = File::create("out.mp4")?;
 // Build a muxer for 1920x1080 30 fps video and 48 kHz stereo audio
 let mut mux = MuxerBuilder::new(file)
     .video(VideoCodec::H264, 1920, 1080, 30.0)
-    .audio(AudioCodec::Aac, 48_000, 2)
+    .audio(AudioCodec::Aac(AacProfile::Lc), 48_000, 2)
     .build()?;
 
 // Write frames (encoded elsewhere)

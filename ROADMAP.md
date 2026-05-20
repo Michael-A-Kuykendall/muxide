@@ -63,8 +63,8 @@ Its mission is **simple muxing done right**: encoded frames in, playable MP4 out
 ---
 
 ## Recent Achievements
-- **v0.2.3**: Audit pass — stale docs, dead code, ANSI codes removed from error struct
-- **v0.2.2/v0.2.3**: Codebase audit — correctness fixes, DRY improvements, API cleanup
+- **v0.2.3**: Documentation cleanup, dead code removal, and ANSI codes removed from the ADTS error hex dump
+- **v0.2.2/v0.2.3**: Correctness fixes, DRY improvements, and API cleanup
 - **Codebase Cleanup**: Removed external crate references, focused on core muxing functionality
 - **Quality Assurance**: Comprehensive testing with property-based tests and contract verification
 

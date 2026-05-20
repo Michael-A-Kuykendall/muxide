@@ -125,7 +125,7 @@ If input violates the contract, Muxide **fails fast** with explicit errors—no 
 | 🧵 **Thread-safe** | `Send + Sync` when writer is |
 | ✅ **Well-tested** | Unit, integration, property tests |
 | 📜 **Permissive license** | Dual-licensed: MIT OR Apache-2.0 |
-| � **Developer-friendly** | Detailed error context with hex dumps and actionable suggestions |
+| 🛠️ **Developer-friendly** | Detailed error context with hex dumps and actionable suggestions |
 
 > **Note:** `no_std` is not supported. Muxide requires `std::io::Write`.
 
@@ -358,16 +358,11 @@ Probably **not** a fit if you need encoding, demuxing, or legacy codecs (MPEG-2,
 
 ## Performance
 
-Muxide is designed for **minimal overhead**. Muxing should never be your bottleneck.
+Muxide is designed for **low overhead**, but exact throughput depends on your bitstreams, storage, and hardware.
 
-| Scenario | Time | Throughput |
-|----------|------|------------|
-| 1000 H.264 frames | 264 µs | **3.7M frames/sec** |
-| 1000 H.264 + fast-start | 362 µs | 2.8M frames/sec |
-| 1000 video + 1500 audio | 457 µs | 2.2M frames/sec |
-| 100 4K frames (~6.5 MB) | 14 ms | **464 MB/sec** |
+Criterion benchmarks live in [benches/muxing.rs](benches/muxing.rs). Run `cargo bench` on your target environment to measure realistic throughput for your workload.
 
-> **Note:** Benchmarks are based on development hardware. Encoding is typically the bottleneck—muxing overhead is negligible. Run `cargo bench` for your environment (dev-only benchmarks available).
+> **Note:** Benchmark results are environment-specific. Encoding is typically the bottleneck; measure muxing overhead on representative inputs before publishing exact numbers.
 
 ### H.264/AVC
 
@@ -398,8 +393,6 @@ Muxide is designed for **minimal overhead**. Muxing should never be your bottlen
 - **Format:** Raw Opus packets (no container)
 - **Sample rate:** Always 48000 Hz (Opus specification)
 - **Channels:** 1 (mono) or 2 (stereo)
-
-</details>
 
 ---
 

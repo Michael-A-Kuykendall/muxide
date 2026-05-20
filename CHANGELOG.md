@@ -13,7 +13,7 @@
 ### ✨ **Documentation**
 - **`MuxerBuilder` struct doc was stale**: Said "B-frame support, fragmented MP4 will be added in future slices" — both are implemented. Replaced with an accurate summary of all supported codecs and output modes.
 - **`build()` comment was stale**: Said "In v0, we perform minimal validation... Future releases may relax this." Removed development-phase language.
-- **`finish_in_place()` doc leaked internal artifact**: "a minimal MP4 header that can be inspected by the slice 02 tests" removed; replaced with an accurate description.
+- **`finish_in_place()` doc leaked an internal test reference**: Removed the stale implementation-specific wording and replaced it with an accurate description.
 - **`finish()` and `finish_with_stats()` had no doc comments.** Both now documented.
 - **`finish_in_place_with_stats()` doc improved**: Now cross-references `finish_in_place()`.
 - **`write_audio()` doc only mentioned AAC**: Now explicitly covers Opus packets too.
