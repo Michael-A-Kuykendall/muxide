@@ -7,7 +7,7 @@
 use crate::assert_invariant;
 
 /// VP9 codec configuration extracted from the first keyframe.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Vp9Config {
     /// Video width in pixels.
     pub width: u32,
@@ -162,13 +162,6 @@ pub fn extract_vp9_config(keyframe: &[u8]) -> Option<Vp9Config> {
     if frame_marker != 2 {
         return None;
     }
-
-    // INV-401: VP9 frame_marker must be 2
-    assert_invariant!(
-        frame_marker == 2,
-        "INV-401: VP9 frame_marker must be 2",
-        "codec::vp9::extract_vp9_config"
-    );
 
     // profile
     let profile_low = r.read_bit()?;

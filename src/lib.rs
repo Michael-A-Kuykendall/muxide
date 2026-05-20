@@ -60,5 +60,6 @@ pub mod codec;
 // Input validation utilities for dry-run functionality
 pub mod validation;
 
-// Invariant PPT testing framework
+// Invariant PPT testing framework (internal; not part of the public API)
+#[doc(hidden)]
 pub mod invariant_ppt;

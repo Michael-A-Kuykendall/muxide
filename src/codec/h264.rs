@@ -147,14 +147,7 @@ pub fn extract_avc_config(data: &[u8]) -> Option<AvcConfig> {
         }
     }
 
-    // INV-302: Both SPS and PPS must be found for valid config
     if let (Some(sps_data), Some(pps_data)) = (sps, pps) {
-        assert_invariant!(
-            !sps_data.is_empty() && !pps_data.is_empty(),
-            "INV-302: H.264 SPS and PPS must be non-empty",
-            "codec::h264::extract_avc_config"
-        );
-
         Some(AvcConfig {
             sps: sps_data.to_vec(),
             pps: pps_data.to_vec(),
@@ -166,7 +159,7 @@ pub fn extract_avc_config(data: &[u8]) -> Option<AvcConfig> {
 
 /// Create a default AVC configuration for testing/fallback.
 ///
-/// Returns a valid configuration for 1080p @ High Profile, Level 4.0.
+/// Returns a valid configuration for 640×480 @ Baseline Profile, Level 3.0.
 pub fn default_avc_config() -> AvcConfig {
     AvcConfig {
         sps: DEFAULT_SPS.to_vec(),

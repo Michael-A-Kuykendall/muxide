@@ -33,10 +33,11 @@
 //! # }
 //! ```
 
-// No imports needed currently - pure Vec-based API
+use crate::muxer::mp4::encode_language_code;
 
 /// Errors that can occur during fragmented MP4 muxing.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum FragmentedError {
     /// DTS values must be non-decreasing.
     NonMonotonicDts { prev_dts: u64, curr_dts: u64 },
@@ -387,21 +388,6 @@ fn build_mdia_fmp4(config: &FragmentConfig) -> Vec<u8> {
     build_box(b"mdia", &payload)
 }
 
-fn encode_language_code(language: &str) -> [u8; 2] {
-    // ISO 639-2/T language codes are packed into 16 bits as (c1<<10) | (c2<<5) | c3
-    // where each character is offset by 0x60
-    let chars: Vec<char> = language.chars().take(3).collect();
-    let c1 = chars.first().copied().unwrap_or('u') as u16;
-    let c2 = chars.get(1).copied().unwrap_or('n') as u16;
-    let c3 = chars.get(2).copied().unwrap_or('d') as u16;
-
-    let packed = ((c1.saturating_sub(0x60) & 0x1F) << 10)
-        | ((c2.saturating_sub(0x60) & 0x1F) << 5)
-        | (c3.saturating_sub(0x60) & 0x1F);
-
-    packed.to_be_bytes()
-}
-
 fn build_mdhd_fmp4(timescale: u32, language: Option<&str>) -> Vec<u8> {
     let mut payload = Vec::new();
     payload.extend_from_slice(&0u32.to_be_bytes()); // Version + flags
@@ -602,22 +588,39 @@ fn build_empty_stco() -> Vec<u8> {
 }
 
 fn build_hvcc_fmp4(config: &FragmentConfig) -> Vec<u8> {
+    use crate::codec::h265::HevcConfig;
+
+    // Extract profile/level from the provided SPS bytes using HevcConfig helpers.
+    let hevc = HevcConfig::new(
+        config.vps.clone().unwrap_or_default(),
+        config.sps.clone(),
+        config.pps.clone(),
+    );
+    let general_profile_space = hevc.general_profile_space();
+    let general_tier_flag = hevc.general_tier_flag();
+    let general_profile_idc = hevc.general_profile_idc();
+    let general_level_idc = hevc.general_level_idc();
+
     let num_arrays: u8 = if config.vps.is_some() { 3 } else { 2 };
 
+    let byte1 = (general_profile_space << 6)
+        | (if general_tier_flag { 0x20 } else { 0 })
+        | (general_profile_idc & 0x1f);
+
     let mut payload = vec![
-        1, // configuration_version
-        0, // general_profile_space (2 bits), general_tier_flag (1 bit), general_profile_idc (5 bits) - using defaults
-        0, 0, 0, 0, // general_profile_compatibility_flags
-        0, 0, 0, 0, 0, 0, // general_constraint_indicator_flags
-        0, // general_level_idc - using default
-        0, 0, // min_spatial_segmentation_idc
-        0, // parallelismType
-        0, // chromaFormat
-        0, // bitDepthLumaMinus8
-        0, // bitDepthChromaMinus8
-        0, 0,          // avgFrameRate
-        0x07, // constantFrameRate=0, numTemporalLayers=0, temporalIdNested=1, lengthSizeMinusOne=3 (4-byte lengths)
-        num_arrays, // numOfArrays
+        1,      // configuration_version
+        byte1,  // general_profile_space/tier/idc
+        0x60, 0x00, 0x00, 0x00, // general_profile_compatibility_flags (Main profile)
+        0x90, 0x00, 0x00, 0x00, 0x00, 0x00, // general_constraint_indicator_flags
+        general_level_idc,
+        0xf0, 0x00, // min_spatial_segmentation_idc (reserved=0xf + 12-bit value=0)
+        0xfc,       // parallelismType (reserved=0xfc)
+        0xfd,       // chromaFormat (reserved=0xfc | 4:2:0)
+        0xf8,       // bitDepthLumaMinus8 (reserved=0xf8 | 0)
+        0xf8,       // bitDepthChromaMinus8 (reserved=0xf8 | 0)
+        0, 0,       // avgFrameRate (unspecified)
+        0x07,       // constantFrameRate=0, numTemporalLayers=0, temporalIdNested=1, lengthSizeMinusOne=3
+        num_arrays,
     ];
 
     // VPS array
@@ -668,10 +671,35 @@ fn build_av01_fmp4(config: &FragmentConfig) -> Vec<u8> {
 }
 
 fn build_av1c_fmp4(config: &FragmentConfig) -> Vec<u8> {
+    use crate::codec::av1::extract_av1_config;
+
+    // Extract configuration from the sequence header OBU when available;
+    // fall back to an all-zero config (unknown/profile-0) if parsing fails.
+    let av1 = config
+        .av1_sequence_header
+        .as_deref()
+        .and_then(extract_av1_config)
+        .unwrap_or_default();
+
     let mut payload = Vec::new();
-    payload.push(1); // version
-    payload.push(0); // seq_profile, seq_level_idx_0, seq_tier_0, high_bitdepth, twelve_bit, monochrome, chroma_subsampling_x, chroma_subsampling_y, chroma_sample_position, reserved
-    payload.push(0); // initial_presentation_delay_present, reserved
+    // Byte 0: marker (1) + version (7) = 0x81
+    payload.push(0x81);
+    // Byte 1: seq_profile (3) + seq_level_idx_0 (5)
+    let byte1 = ((av1.seq_profile & 0x07) << 5) | (av1.seq_level_idx & 0x1f);
+    payload.push(byte1);
+    // Byte 2: seq_tier_0 | high_bitdepth | twelve_bit | monochrome
+    //        | chroma_subsampling_x | chroma_subsampling_y | chroma_sample_position (2)
+    let byte2 = ((av1.seq_tier & 0x01) << 7)
+        | (if av1.high_bitdepth { 0x40 } else { 0 })
+        | (if av1.twelve_bit { 0x20 } else { 0 })
+        | (if av1.monochrome { 0x10 } else { 0 })
+        | (if av1.chroma_subsampling_x { 0x08 } else { 0 })
+        | (if av1.chroma_subsampling_y { 0x04 } else { 0 })
+        | (av1.chroma_sample_position & 0x03);
+    payload.push(byte2);
+    // Byte 3: initial_presentation_delay_present=0, reserved
+    payload.push(0x00);
+    // configOBUs: Append the Sequence Header OBU
     if let Some(seq_header) = &config.av1_sequence_header {
         payload.extend_from_slice(seq_header);
     }
@@ -704,15 +732,28 @@ fn build_vp09_fmp4(config: &FragmentConfig) -> Vec<u8> {
 
 fn build_vpcc_fmp4(config: &FragmentConfig) -> Vec<u8> {
     let mut payload = Vec::new();
-    if let Some(vp9_config) = &config.vp9_config {
-        payload.push(1); // version
-        payload.push(vp9_config.profile); // profile
-        payload.push(vp9_config.level); // level
-        payload.push(vp9_config.bit_depth); // bit_depth
-        payload.push(vp9_config.color_space); // color_space
-        payload.push(vp9_config.transfer_function); // transfer_function
-        payload.push(vp9_config.matrix_coefficients); // matrix_coefficients
-        payload.push(vp9_config.full_range_flag); // full_range_flag
+    if let Some(vp9) = &config.vp9_config {
+        // chromaSubsampling: profiles 0/2 → 4:2:0 co-sited (1); profile 1 → 4:2:2 (2); profile 3 → 4:4:4 (3)
+        let chroma_subsampling: u8 = match vp9.profile {
+            1 => 2,
+            3 => 3,
+            _ => 1,
+        };
+        // Packed byte: bitDepth(4) | chromaSubsampling(3) | videoFullRangeFlag(1)
+        let depth_chroma_range =
+            (vp9.bit_depth << 4) | (chroma_subsampling << 1) | vp9.full_range_flag;
+
+        // FullBox header: version=1, flags=0x000000
+        payload.push(1u8);
+        payload.extend_from_slice(&[0u8, 0u8, 0u8]);
+        // VPCodecConfigurationRecord
+        payload.push(vp9.profile);
+        payload.push(vp9.level);
+        payload.push(depth_chroma_range);
+        payload.push(vp9.color_space);           // colourPrimaries
+        payload.push(vp9.transfer_function);     // transferCharacteristics
+        payload.push(vp9.matrix_coefficients);   // matrixCoefficients
+        payload.extend_from_slice(&0u16.to_be_bytes()); // codecInitializationDataSize = 0
     }
     build_box(b"vpcC", &payload)
 }

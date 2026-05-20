@@ -31,11 +31,11 @@ use super::common::AnnexBNalIter;
 
 /// H.265 NAL unit type constants.
 pub mod nal_type {
-    /// Coded slice segment of a BLA picture
+    /// Coded slice segment of a BLA_W_LP picture
     pub const BLA_W_LP: u8 = 16;
-    /// Coded slice segment of a BLA picture
+    /// Coded slice segment of a BLA_W_RADL picture
     pub const BLA_W_RADL: u8 = 17;
-    /// Coded slice segment of a BLA picture
+    /// Coded slice segment of a BLA_N_LP picture
     pub const BLA_N_LP: u8 = 18;
     /// IDR with RADL pictures
     pub const IDR_W_RADL: u8 = 19;
@@ -249,10 +249,9 @@ pub fn hevc_annexb_to_hvcc(data: &[u8]) -> Vec<u8> {
 
 /// Check if the given Annex B data represents an HEVC keyframe (IRAP).
 pub fn is_hevc_keyframe(data: &[u8]) -> bool {
-    assert_invariant!(
-        !data.is_empty(),
-        "INV-503: HEVC keyframe detection requires non-empty data"
-    );
+    if data.is_empty() {
+        return false;
+    }
 
     for nal in AnnexBNalIter::new(data) {
         if nal.is_empty() {

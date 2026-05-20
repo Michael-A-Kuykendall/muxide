@@ -70,7 +70,7 @@ pub struct VideoValidationConfig {
 pub struct AudioValidationConfig {
     pub codec: Option<AudioCodec>,
     pub sample_rate: Option<u32>,
-    pub channels: Option<u8>,
+    pub channels: Option<u16>,
     pub sample_frame: Option<Vec<u8>>,
 }
 
@@ -129,7 +129,7 @@ pub fn validate_video_config(
 pub fn validate_audio_config(
     codec: AudioCodec,
     sample_rate: u32,
-    channels: u8,
+    channels: u16,
 ) -> ValidationResult {
     let mut result = ValidationResult::valid();
 

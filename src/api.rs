@@ -320,6 +320,19 @@ pub struct MuxerBuilder<Writer> {
     vp9_config: Option<crate::codec::vp9::Vp9Config>,
 }
 
+impl<W: fmt::Debug> fmt::Debug for MuxerBuilder<W> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MuxerBuilder")
+            .field("video", &self.video)
+            .field("audio", &self.audio)
+            .field("fast_start", &self.fast_start)
+            .field("has_sps", &self.sps.is_some())
+            .field("has_pps", &self.pps.is_some())
+            .field("has_vps", &self.vps.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
 impl<Writer> MuxerBuilder<Writer> {
     /// Create a new builder for the given output writer.
     pub fn new(writer: Writer) -> Self {
@@ -593,6 +606,19 @@ pub struct Muxer<Writer> {
     current_audio_pts: f64,
 }
 
+impl<W: fmt::Debug> fmt::Debug for Muxer<W> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Muxer")
+            .field("video_track", &self.video_track)
+            .field("audio_track", &self.audio_track)
+            .field("fast_start", &self.fast_start)
+            .field("video_frame_count", &self.video_frame_count)
+            .field("audio_frame_count", &self.audio_frame_count)
+            .field("finished", &self.finished)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Error type for builder validation and runtime errors.
 ///
 /// All errors include context to help diagnose issues. Error messages are designed
@@ -741,8 +767,9 @@ impl fmt::Display for MuxerError {
                           set is_keyframe=true and ensure the frame contains an IDR NAL unit")
             }
             MuxerError::FirstVideoFrameMissingSpsPps => {
-                write!(f, "first video frame must contain SPS and PPS NAL units: \
-                          prepend SPS (NAL type 7) and PPS (NAL type 8) to the first keyframe")
+                write!(f, "first H.264/H.265 keyframe must contain parameter sets: \
+                          for H.264 prepend SPS (NAL type 7) and PPS (NAL type 8); \
+                          for H.265 prepend VPS (type 32), SPS (type 33), and PPS (type 34)")
             }
             MuxerError::FirstAv1FrameMissingSequenceHeader => {
                 write!(f, "first AV1 frame must contain a Sequence Header OBU: \
@@ -774,7 +801,11 @@ impl<Writer: Write> Muxer<Writer> {
     ///
     /// `pts` is the presentation timestamp in seconds.  Frames must
     /// be supplied in strictly increasing PTS order.  The `data` slice
-    /// contains the encoded frame bitstream in Annex B format (for H.264).
+    /// contains the encoded frame bitstream:
+    /// - H.264: Annex B format (start-code prefixed NAL units)
+    /// - H.265: Annex B format (start-code prefixed NAL units)
+    /// - AV1: length-prefixed OBU format
+    /// - VP9: raw compressed VP9 frame (frame header intact)
     ///
     /// For streams with B-frames (where PTS != DTS), use `write_video_with_dts()` instead.
     pub fn write_video(

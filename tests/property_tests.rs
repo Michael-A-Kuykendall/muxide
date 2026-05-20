@@ -410,9 +410,14 @@ mod contract_tests {
         let _ = muxide::codec::av1::extract_av1_config(&av1_data);
 
         // Verify AV1 config extraction invariants were checked
+        // (INV-201 was a dead invariant removed in the audit; remaining invariants
+        //  are INV-202 and the sequence-profile check)
         contract_test(
             "codec::av1::extract_av1_config",
-            &["INV-201: AV1 OBU type must be valid (0-15)"],
+            &[
+                "AV1 header size must not exceed OBU data length",
+                "AV1 sequence profile must be valid (0-3)",
+            ],
         );
     }
 
@@ -427,11 +432,11 @@ mod contract_tests {
         let _ = muxide::codec::h264::extract_avc_config(&h264_data);
 
         // Verify H.264 config extraction invariants were checked
+        // INV-302 was a dead invariant (SPS/PPS already filtered) and was removed
         contract_test(
             "codec::h264::extract_avc_config",
             &[
                 "INV-301: H.264 NAL type must be valid (0-31)",
-                "INV-302: H.264 SPS and PPS must be non-empty",
             ],
         );
     }
@@ -450,10 +455,10 @@ mod contract_tests {
         let _ = muxide::codec::vp9::extract_vp9_config(&vp9_data);
 
         // Verify VP9 config extraction invariants were checked
+        // INV-401 was a dead invariant (frame_marker already checked) and was removed
         contract_test(
             "codec::vp9::extract_vp9_config",
             &[
-                "INV-401: VP9 frame_marker must be 2",
                 "INV-402: VP9 profile must be valid (0-3)",
             ],
         );
@@ -502,10 +507,10 @@ mod contract_tests {
         let _ = muxide::codec::h265::is_hevc_keyframe(&hevc_data);
 
         // Verify H.265 keyframe detection invariants were checked
+        // INV-503 was changed to an early-return guard (returns false on empty)
         contract_test(
             "codec::h265::is_hevc_keyframe",
             &[
-                "INV-503: HEVC keyframe detection requires non-empty data",
                 "INV-504: HEVC NAL type must be valid (0-63)",
                 // INV-505 is only checked when no keyframe is found
             ],

@@ -251,13 +251,6 @@ pub fn extract_av1_config(data: &[u8]) -> Option<Av1Config> {
     }
 
     for (info, obu_data) in ObuIter::new(data) {
-        // INV-201: OBU type must be valid
-        assert_invariant!(
-            info.obu_type <= 15,
-            "INV-201: AV1 OBU type must be valid (0-15)",
-            "codec::av1::extract_av1_config"
-        );
-
         if info.obu_type == obu_type::SEQUENCE_HEADER {
             return parse_sequence_header(obu_data, info.header_size);
         }
@@ -278,13 +271,6 @@ fn parse_sequence_header(obu_data: &[u8], header_size: usize) -> Option<Av1Confi
     if payload.is_empty() {
         return None;
     }
-
-    // INV-203: Sequence header payload must be non-empty
-    assert_invariant!(
-        !payload.is_empty(),
-        "AV1 sequence header payload must be non-empty",
-        "codec::av1::parse_sequence_header"
-    );
 
     // Create a bit reader for the payload
     let mut reader = BitReader::new(payload);

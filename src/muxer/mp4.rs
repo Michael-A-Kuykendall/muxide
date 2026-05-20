@@ -1339,7 +1339,7 @@ fn build_moov_box(
     let video_duration_ms =
         (video_duration_media * MOVIE_TIMESCALE as u64 / MEDIA_TIMESCALE as u64) as u32;
 
-    let mvhd_payload = build_mvhd_payload(video_duration_ms);
+    let mvhd_payload = build_mvhd_payload(video_duration_ms, if audio.is_some() { 3 } else { 2 });
     let mvhd_box = build_box(b"mvhd", &mvhd_payload);
     let trak_box = build_trak_box(video, video_tables, video_config, metadata);
 
@@ -1458,7 +1458,10 @@ fn build_mp4a_box(audio: &Mp4AudioTrack) -> Vec<u8> {
 }
 
 fn build_esds_box(audio: &Mp4AudioTrack) -> Vec<u8> {
-    let asc = build_audio_specific_config(audio.sample_rate, audio.channels);
+    let asc = {
+        let profile = if let AudioCodec::Aac(p) = audio.codec { p } else { AacProfile::Lc };
+        build_audio_specific_config(audio.sample_rate, audio.channels, profile)
+    };
 
     let mut dec_specific = Vec::new();
     dec_specific.push(0x05);
@@ -1497,7 +1500,7 @@ fn build_esds_box(audio: &Mp4AudioTrack) -> Vec<u8> {
     build_box(b"esds", &payload)
 }
 
-fn build_audio_specific_config(sample_rate: u32, channels: u16) -> [u8; 2] {
+fn build_audio_specific_config(sample_rate: u32, channels: u16, profile: AacProfile) -> [u8; 2] {
     let sfi = match sample_rate {
         96000 => 0,
         88200 => 1,
@@ -1514,7 +1517,17 @@ fn build_audio_specific_config(sample_rate: u32, channels: u16) -> [u8; 2] {
         7350 => 12,
         _ => 4,
     };
-    let aot = 2u8;
+    // ISO 14496-3 Table 1.1 — audioObjectType values.
+    // HE-AAC (5) and HE-AACv2 (29) technically require SBR/PS extension signaling
+    // beyond the two-byte ASC; the AOT is still encoded correctly here.
+    let aot: u8 = match profile {
+        AacProfile::Main => 1,
+        AacProfile::Lc   => 2,
+        AacProfile::Ssr  => 3,
+        AacProfile::Ltp  => 4,
+        AacProfile::He   => 5,
+        AacProfile::Hev2 => 29,
+    };
     let chan = (channels.min(15) as u8) & 0x0f;
     let byte0 = (aot << 3) | (sfi >> 1);
     let byte1 = ((sfi & 1) << 7) | (chan << 3);
@@ -2158,7 +2171,7 @@ fn build_vpcc_box(vp9_config: &Vp9Config) -> Vec<u8> {
 
 fn build_vmhd_box() -> Vec<u8> {
     let mut payload = Vec::new();
-    payload.extend_from_slice(&0u32.to_be_bytes());
+    payload.extend_from_slice(&0x0000_0001u32.to_be_bytes()); // version=0, flags=0x000001 (required by spec)
     payload.extend_from_slice(&0u16.to_be_bytes());
     payload.extend_from_slice(&0u16.to_be_bytes());
     payload.extend_from_slice(&0u16.to_be_bytes());
@@ -2186,7 +2199,7 @@ fn build_url_box() -> Vec<u8> {
     build_box(b"url ", &payload)
 }
 
-fn encode_language_code(language: &str) -> [u8; 2] {
+pub(crate) fn encode_language_code(language: &str) -> [u8; 2] {
     // ISO 639-2/T language codes are packed into 16 bits as (c1<<10) | (c2<<5) | c3
     // where each character is offset by 0x60
     let chars: Vec<char> = language.chars().take(3).collect();
@@ -2207,11 +2220,21 @@ fn build_mdhd_box_with_timescale_and_duration(
     language: Option<&str>,
 ) -> Vec<u8> {
     let mut payload = Vec::new();
-    payload.extend_from_slice(&0u32.to_be_bytes()); // version + flags
-    payload.extend_from_slice(&0u32.to_be_bytes()); // creation_time
-    payload.extend_from_slice(&0u32.to_be_bytes()); // modification_time
-    payload.extend_from_slice(&timescale.to_be_bytes());
-    payload.extend_from_slice(&(duration as u32).to_be_bytes()); // duration
+    if duration > u32::MAX as u64 {
+        // Version 1: 64-bit creation/modification time and duration.
+        payload.extend_from_slice(&0x0100_0000u32.to_be_bytes()); // version=1, flags=0
+        payload.extend_from_slice(&0u64.to_be_bytes()); // creation_time (u64)
+        payload.extend_from_slice(&0u64.to_be_bytes()); // modification_time (u64)
+        payload.extend_from_slice(&timescale.to_be_bytes());
+        payload.extend_from_slice(&duration.to_be_bytes()); // duration (u64)
+    } else {
+        // Version 0: 32-bit creation/modification time and duration.
+        payload.extend_from_slice(&0u32.to_be_bytes()); // version=0, flags=0
+        payload.extend_from_slice(&0u32.to_be_bytes()); // creation_time
+        payload.extend_from_slice(&0u32.to_be_bytes()); // modification_time
+        payload.extend_from_slice(&timescale.to_be_bytes());
+        payload.extend_from_slice(&(duration as u32).to_be_bytes()); // duration
+    }
     payload.extend_from_slice(&encode_language_code(language.unwrap_or("und"))); // language
     payload.extend_from_slice(&0u16.to_be_bytes()); // pre_defined
     build_box(b"mdhd", &payload)
@@ -2253,7 +2276,8 @@ fn build_tkhd_box(video: &Mp4VideoTrack) -> Vec<u8> {
 
 fn build_tkhd_box_with_id(track_id: u32, volume: u16, width: u32, height: u32) -> Vec<u8> {
     let mut payload = Vec::new();
-    payload.extend_from_slice(&0u32.to_be_bytes());
+    // version=0 (1 byte) + flags=0x000003 track_enabled|track_in_movie (3 bytes)
+    payload.extend_from_slice(&0x0000_0003u32.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&track_id.to_be_bytes());
@@ -2294,7 +2318,7 @@ fn build_ftyp_box() -> Vec<u8> {
     build_box(b"ftyp", &payload)
 }
 
-fn build_mvhd_payload(duration_ms: u32) -> Vec<u8> {
+fn build_mvhd_payload(duration_ms: u32, next_track_id: u32) -> Vec<u8> {
     let mut payload = Vec::new();
     payload.extend_from_slice(&0u32.to_be_bytes()); // version + flags
     payload.extend_from_slice(&0u32.to_be_bytes()); // creation_time
@@ -2322,7 +2346,7 @@ fn build_mvhd_payload(duration_ms: u32) -> Vec<u8> {
     for _ in 0..6 {
         payload.extend_from_slice(&0u32.to_be_bytes()); // pre_defined
     }
-    payload.extend_from_slice(&2u32.to_be_bytes()); // next_track_ID
+    payload.extend_from_slice(&next_track_id.to_be_bytes()); // next_track_ID
     payload
 }
 
@@ -2743,21 +2767,21 @@ mod tests {
 
     #[test]
     fn build_audio_specific_config_standard_rates() {
-        // Test standard AAC sample rates
-        assert_eq!(build_audio_specific_config(44100, 2), [0x12, 0x10]); // 44100 Hz, stereo
-        assert_eq!(build_audio_specific_config(48000, 2), [0x11, 0x90]); // 48000 Hz, stereo
-        assert_eq!(build_audio_specific_config(22050, 1), [0x13, 0x88]); // 22050 Hz, mono
-        assert_eq!(build_audio_specific_config(8000, 1), [0x15, 0x88]); // 8000 Hz, mono
+        // Test standard AAC sample rates (AAC-LC profile)
+        assert_eq!(build_audio_specific_config(44100, 2, AacProfile::Lc), [0x12, 0x10]); // 44100 Hz, stereo
+        assert_eq!(build_audio_specific_config(48000, 2, AacProfile::Lc), [0x11, 0x90]); // 48000 Hz, stereo
+        assert_eq!(build_audio_specific_config(22050, 1, AacProfile::Lc), [0x13, 0x88]); // 22050 Hz, mono
+        assert_eq!(build_audio_specific_config(8000, 1, AacProfile::Lc), [0x15, 0x88]); // 8000 Hz, mono
     }
 
     #[test]
     fn build_audio_specific_config_edge_cases() {
         // Test non-standard rate (should default to 44100)
-        assert_eq!(build_audio_specific_config(12345, 2), [0x12, 0x10]);
+        assert_eq!(build_audio_specific_config(12345, 2, AacProfile::Lc), [0x12, 0x10]);
 
         // Test channel limits (max 15 channels)
-        assert_eq!(build_audio_specific_config(44100, 16), [0x12, 0x78]); // 15 channels max
-        assert_eq!(build_audio_specific_config(44100, 0), [0x12, 0x00]); // 0 channels
+        assert_eq!(build_audio_specific_config(44100, 16, AacProfile::Lc), [0x12, 0x78]); // 15 channels max
+        assert_eq!(build_audio_specific_config(44100, 0, AacProfile::Lc), [0x12, 0x00]); // 0 channels
     }
 
     #[test]
