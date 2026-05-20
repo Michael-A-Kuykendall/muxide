@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.4 (May 19, 2026) - Test Rename, Benchmark Repair, Doc Consistency
+
+### 🐛 **Bug Fixes**
+- **Windows test failure resolved**: Renamed `tests/video_setup.rs` to `tests/video_track_structure.rs`. Windows installer-compatibility heuristics were triggering a UAC elevation prompt on any executable containing "setup" in its name, causing that integration test binary to fail on Windows with OS error 740.
+
+### 🔧 **Benchmark Fix**
+- **`benches/muxing.rs` used invalid dummy frames**: Both benchmark functions wrote 10 KB zero-byte buffers which fail H.264 validation. Replaced with real fixture data (`frame0_key.264`, `frame1_p.264`, `frame0.aac.adts`) so benchmarks measure a valid mux path end-to-end.
+
+### ✨ **Documentation**
+- **`docs/contract.md`**: Keyframe invariant now lists per-codec header requirements (SPS/PPS for H.264, VPS/SPS/PPS for H.265, Sequence Header OBU for AV1, frame header params for VP9). Pseudo-code example updated to `Aac(AacProfile::Lc)`.
+- **`README.md`**: Removed fabricated benchmark table with specific µs/throughput numbers that were measured on development hardware; replaced with a pointer to `cargo bench`. Fixed a stray `</details>` tag.
+- **`ROADMAP.md`**: Removed "audit pass" language from Recent Achievements; entries now describe changes, not process.
+- **`release-notes/v0.2.1.md`, `release-notes/v0.2.2.md`**: Added missing release-note files.
+
 ## 0.2.3 (May 21, 2026) - Documentation, DRY, and Residual Bugs
 
 ### 🐛 **Bug Fixes**
