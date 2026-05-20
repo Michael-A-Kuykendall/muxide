@@ -2115,19 +2115,44 @@ fn build_vp09_box(video: &Mp4VideoTrack, vp9_config: &Vp9Config) -> Vec<u8> {
 
 /// Build a vpcC configuration box for VP9.
 ///
-/// Based on VP9 Codec ISO Media File Format Binding specification.
+/// Layout per VP9 Codec ISO Media File Format Binding specification:
+///
+/// ```text
+/// vpcC FullBox (version=1, flags=0) {
+///     profile              (1 byte)
+///     level                (1 byte)
+///     bitDepth(4) | chromaSubsampling(3) | videoFullRangeFlag(1)  (1 byte)
+///     colourPrimaries      (1 byte)
+///     transferCharacteristics (1 byte)
+///     matrixCoefficients   (1 byte)
+///     codecInitializationDataSize  (2 bytes, big-endian, = 0)
+/// }
+/// ```
 fn build_vpcc_box(vp9_config: &Vp9Config) -> Vec<u8> {
-    let payload = vec![
-        1,                              // Version (1 byte) - set to 1
-        vp9_config.profile,             // Profile (1 byte)
-        vp9_config.level,               // Level (1 byte)
-        vp9_config.bit_depth,           // Bit depth (1 byte)
-        vp9_config.color_space,         // Color space (1 byte)
-        vp9_config.transfer_function,   // Transfer function (1 byte)
-        vp9_config.matrix_coefficients, // Matrix coefficients (1 byte)
-        vp9_config.full_range_flag,     // Video full range flag (1 byte)
-    ];
+    // chromaSubsampling: 0 = 4:2:0 left-collocated, 1 = 4:2:0 co-sited (typical libvpx),
+    // 2 = 4:2:2, 3 = 4:4:4.  Profiles 0/2 are always 4:2:0; profiles 1/3 vary.
+    let chroma_subsampling: u8 = match vp9_config.profile {
+        1 => 2, // 4:2:2
+        3 => 3, // 4:4:4
+        _ => 1, // 4:2:0 co-sited (most libvpx-vp9 default output)
+    };
 
+    // Byte: [bitDepth(4 bits)] [chromaSubsampling(3 bits)] [videoFullRangeFlag(1 bit)]
+    let depth_chroma_range =
+        (vp9_config.bit_depth << 4) | (chroma_subsampling << 1) | vp9_config.full_range_flag;
+
+    let mut payload = Vec::new();
+    // FullBox header: version=1, flags=0x000000
+    payload.push(1u8);
+    payload.extend_from_slice(&[0u8, 0u8, 0u8]);
+    // VPCodecConfigurationRecord
+    payload.push(vp9_config.profile);
+    payload.push(vp9_config.level);
+    payload.push(depth_chroma_range);
+    payload.push(vp9_config.color_space);         // colourPrimaries
+    payload.push(vp9_config.transfer_function);   // transferCharacteristics
+    payload.push(vp9_config.matrix_coefficients); // matrixCoefficients
+    payload.extend_from_slice(&0u16.to_be_bytes()); // codecInitializationDataSize = 0
     build_box(b"vpcC", &payload)
 }
 

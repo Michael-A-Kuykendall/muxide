@@ -441,11 +441,10 @@ mod contract_tests {
     fn contract_vp9_config_extraction() {
         clear_invariant_log();
 
-        // Create minimal VP9 keyframe data
-        let vp9_data = vec![
-            0x49, 0x83, 0x42, // Frame marker
-            0x00, 0x00, 0x00, // Profile=0, show_existing=0, frame_type=0
-        ];
+        // 0x82 = frame_marker=2, profile=0, keyframe — passes both marker and
+        // profile invariants (INV-401, INV-402), then returns None because the
+        // sync-code bytes (0x00,0x00,0x00) don't match 0x49,0x83,0x42.
+        let vp9_data = vec![0x82, 0x00, 0x00, 0x00];
 
         // Call extract_vp9_config directly to trigger invariants
         let _ = muxide::codec::vp9::extract_vp9_config(&vp9_data);
@@ -454,7 +453,7 @@ mod contract_tests {
         contract_test(
             "codec::vp9::extract_vp9_config",
             &[
-                "INV-401: VP9 frame marker must be 0x49 0x83 0x42",
+                "INV-401: VP9 frame_marker must be 2",
                 "INV-402: VP9 profile must be valid (0-3)",
             ],
         );

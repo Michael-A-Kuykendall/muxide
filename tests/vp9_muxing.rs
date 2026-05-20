@@ -3,64 +3,31 @@ mod support;
 use muxide::api::{MuxerBuilder, VideoCodec};
 use support::SharedBuffer;
 
-/// Build a minimal VP9 keyframe with valid frame header.
+/// Build a minimal VP9 keyframe with a valid uncompressed header.
 ///
-/// This creates a synthetic VP9 frame with:
-/// - Valid frame marker (0x49 0x83 0x42)
-/// - Profile 0, keyframe, 100x100 resolution
-/// - 8-bit color depth, BT.709 color space
+/// Byte layout (bit-packed, MSB first per the VP9 spec):
+///   Byte 0 (0x82): frame_marker=2, profile=0, show_existing=0,
+///                  frame_type=0 (KEY), show_frame=1, error_resilient=0
+///   Bytes 1-3:     frame_sync_code 0x49 0x83 0x42
+///   Byte 4 (0x40): color_space=2 (BT.709), color_range=0, width_minus1[15:12]=0
+///   Byte 5 (0x06): width_minus1[11:4]   → width_minus1 = 99 → width = 100
+///   Byte 6 (0x30): width_minus1[3:0]=3, height_minus1[15:12]=0
+///   Byte 7 (0x06): height_minus1[11:4]  → height_minus1 = 99 → height = 100
+///   Byte 8 (0x30): height_minus1[3:0]=3, render_same=0, padding
 fn build_vp9_keyframe() -> Vec<u8> {
-    let mut data = Vec::new();
-
-    // VP9 frame marker
-    data.extend_from_slice(&[0x49, 0x83, 0x42]);
-
-    // Frame header byte 0: profile=0, show_existing_frame=0, frame_type=0 (keyframe)
-    data.push(0x00);
-
-    // Frame header byte 1: show_frame=1, error_resilient_mode=0
-    data.push(0x80);
-
-    // Frame width (100) as LEB128
-    // 100 = 0x64, LEB128: [0x64]
-    data.push(0x64);
-
-    // Frame height (100) as LEB128
-    // 100 = 0x64, LEB128: [0x64]
-    data.push(0x64);
-
-    // Render size same as frame size (bit 2 = 0)
-    // Color config: bit_depth=8, color_space=1 (BT.709), transfer_function=1, matrix_coefficients=1
-    data.push(0x12); // 0001 0010: bit_depth=8, color_space=1, transfer=0, matrix=0
-
-    // Minimal frame data (just enough to make it a valid frame)
-    data.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
-
-    data
+    vec![
+        0x82, 0x49, 0x83, 0x42, // frame header byte + frame_sync_code
+        0x40, 0x06, 0x30, 0x06, 0x30, // color_config + frame_size (100×100, BT.709)
+        0x00, 0x00, 0x00, 0x00, // minimal compressed payload
+    ]
 }
 
-/// Build a minimal VP9 P-frame (inter frame).
+/// Build a minimal VP9 inter (P-) frame.
 ///
-/// This creates a synthetic VP9 P-frame with:
-/// - Valid frame marker
-/// - Frame type = 1 (inter frame)
-/// - References the previous keyframe
+/// Byte 0 (0x86): frame_marker=2, profile=0, show_existing=0,
+///                frame_type=1 (INTER), show_frame=1, error_resilient=0
 fn build_vp9_pframe() -> Vec<u8> {
-    let mut data = Vec::new();
-
-    // VP9 frame marker
-    data.extend_from_slice(&[0x49, 0x83, 0x42]);
-
-    // Frame header byte 0: profile=0, show_existing_frame=0, frame_type=1 (inter)
-    data.push(0x10);
-
-    // Frame header byte 1: show_frame=1, error_resilient_mode=0
-    data.push(0x80);
-
-    // Minimal frame data for P-frame
-    data.extend_from_slice(&[0x00, 0x00]);
-
-    data
+    vec![0x86, 0x00, 0x00]
 }
 
 /// Recursively search for a 4CC in an MP4 container by pattern matching
@@ -159,7 +126,7 @@ fn vp9_config_extraction_works() {
     assert_eq!(config.height, 100);
     assert_eq!(config.profile, 0);
     assert_eq!(config.bit_depth, 8);
-    assert_eq!(config.color_space, 1); // BT.709
+    assert_eq!(config.color_space, 2); // BT.709
 }
 
 #[test]
