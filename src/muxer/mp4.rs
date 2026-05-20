@@ -1367,7 +1367,7 @@ fn build_audio_trak_box(
     tables: &SampleTables,
     metadata: Option<&Metadata>,
 ) -> Vec<u8> {
-    let tkhd_box = build_audio_tkhd_box();
+    let tkhd_box = build_audio_tkhd_box(tables);
     let mdia_box = build_audio_mdia_box(audio, tables, metadata);
 
     let mut payload = Vec::new();
@@ -1376,8 +1376,10 @@ fn build_audio_trak_box(
     build_box(b"trak", &payload)
 }
 
-fn build_audio_tkhd_box() -> Vec<u8> {
-    build_tkhd_box_with_id(2, 0x0100, 0, 0)
+fn build_audio_tkhd_box(tables: &SampleTables) -> Vec<u8> {
+    let duration_ms =
+        (tables.total_duration() * MOVIE_TIMESCALE as u64 / MEDIA_TIMESCALE as u64) as u32;
+    build_tkhd_box_with_id(2, 0x0100, 0, 0, duration_ms)
 }
 
 fn build_audio_mdia_box(
@@ -1616,7 +1618,7 @@ fn build_trak_box(
     video_config: &VideoConfig,
     metadata: Option<&Metadata>,
 ) -> Vec<u8> {
-    let tkhd_box = build_tkhd_box(video);
+    let tkhd_box = build_tkhd_box(video, tables);
     let mdia_box = build_mdia_box(video, tables, video_config, metadata);
 
     let mut payload = Vec::new();
@@ -2270,11 +2272,19 @@ fn build_smhd_box() -> Vec<u8> {
     build_box(b"smhd", &payload)
 }
 
-fn build_tkhd_box(video: &Mp4VideoTrack) -> Vec<u8> {
-    build_tkhd_box_with_id(1, 0, video.width, video.height)
+fn build_tkhd_box(video: &Mp4VideoTrack, tables: &SampleTables) -> Vec<u8> {
+    let duration_ms =
+        (tables.total_duration() * MOVIE_TIMESCALE as u64 / MEDIA_TIMESCALE as u64) as u32;
+    build_tkhd_box_with_id(1, 0, video.width, video.height, duration_ms)
 }
 
-fn build_tkhd_box_with_id(track_id: u32, volume: u16, width: u32, height: u32) -> Vec<u8> {
+fn build_tkhd_box_with_id(
+    track_id: u32,
+    volume: u16,
+    width: u32,
+    height: u32,
+    duration_ms: u32,
+) -> Vec<u8> {
     let mut payload = Vec::new();
     // version=0 (1 byte) + flags=0x000003 track_enabled|track_in_movie (3 bytes)
     payload.extend_from_slice(&0x0000_0003u32.to_be_bytes());
@@ -2282,7 +2292,7 @@ fn build_tkhd_box_with_id(track_id: u32, volume: u16, width: u32, height: u32) -
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&track_id.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes()); // reserved
-    payload.extend_from_slice(&0u32.to_be_bytes()); // duration
+    payload.extend_from_slice(&duration_ms.to_be_bytes()); // duration in movie timescale (ms)
     payload.extend_from_slice(&0u32.to_be_bytes()); // reserved[0]
     payload.extend_from_slice(&0u32.to_be_bytes()); // reserved[1]
     payload.extend_from_slice(&0u16.to_be_bytes());

@@ -18,6 +18,7 @@ Its mission is **simple muxing done right**: encoded frames in, playable MP4 out
 - ✅ Property-based test suite
 - ✅ Published to crates.io
 - ✅ **Bug fix**: `tkhd` version-0 duration was written as `u64` instead of `u32`, corrupting width/height in non-fragmented MP4 (issue #5)
+- ✅ **Bug fix**: `tkhd` track duration field was always 0; now threads actual track duration (in movie timescale) into both video and audio `tkhd` boxes
 
 ### Advanced Features (v0.1.1-0.1.5)
 - ✅ **Comprehensive AAC Support**: All profiles (LC, Main, SSR, LTP, HE, HEv2)
@@ -36,6 +37,7 @@ Its mission is **simple muxing done right**: encoded frames in, playable MP4 out
 ## Next Goals (v0.3.0+)
 
 ### High Priority
+- [ ] **Audio-only MP4/fMP4**: Support muxing audio tracks without a video track (currently `MissingVideoConfig` error)
 - [ ] **Performance Benchmarks**: Establish baseline performance metrics and optimization targets
 - [ ] **Enhanced Documentation**: More real-world examples, tutorials, and API docs
 - [ ] **Async I/O Support**: Optional tokio-based async operations for large file handling

@@ -12,6 +12,7 @@
 
 ### 🔧 **MP4 Spec Compliance**
 - **`build_tkhd_box` emitted `flags = 0`** (`muxer/mp4.rs`): ISO 14496-12 §8.3.2 requires bit 0 (track_enabled) and bit 1 (track_in_movie) set. Fixed to `0x0000_0003`.
+- **`build_tkhd_box` track duration was always 0** (`muxer/mp4.rs`): ISO 14496-12 §8.3.2 requires the `duration` field to carry the track duration in movie timescale. Both video and audio `tkhd` boxes now receive the actual computed duration instead of 0. (Reported via PR #4 and PR #6.)
 - **`build_vmhd_box` emitted `flags = 0`** (`muxer/mp4.rs`): ISO 14496-12 §12.1.2 requires `flags = 1`. Fixed.
 - **`build_mvhd_payload` hardcoded `next_track_ID = 2`** (`muxer/mp4.rs`): even when both video and audio tracks were present. Now passes the correct value (2 for video-only, 3 for video+audio).
 
