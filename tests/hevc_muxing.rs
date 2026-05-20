@@ -124,3 +124,96 @@ fn hevc_keyframe_must_have_vps_sps_pps() {
 
     assert!(result.is_err(), "Keyframe must contain VPS, SPS, and PPS");
 }
+
+/// Regression test: BLA IRAP NAL types (16-18) must be treated as keyframes by encode_video.
+/// Before the fix, api::is_keyframe only checked NAL types 19-21, missing BLA frames.
+#[test]
+fn hevc_encode_video_detects_bla_w_lp_as_keyframe() {
+    let (writer, buffer) = SharedBuffer::new();
+
+    let mut muxer = MuxerBuilder::new(writer)
+        .video(VideoCodec::H265, 640, 480, 30.0)
+        .build()
+        .expect("build should succeed");
+
+    // Build a minimal BLA_W_LP frame: VPS + SPS + PPS + BLA_W_LP slice.
+    // BLA_W_LP = NAL type 16, first header byte = (16 << 1) = 0x20.
+    let mut bla_keyframe = build_hevc_keyframe();
+    // Replace the IDR NAL header byte (0x26 = type 19) with BLA_W_LP (0x20 = type 16).
+    let idx = bla_keyframe
+        .windows(2)
+        .position(|w| w == [0x26, 0x01])
+        .expect("IDR slice must be present in fixture");
+    bla_keyframe[idx] = 0x20; // Change to BLA_W_LP
+
+    // encode_video auto-detects keyframe from bitstream; this must NOT return FirstVideoFrameMustBeKeyframe.
+    let result = muxer.encode_video(&bla_keyframe, 33);
+    assert!(
+        result.is_ok(),
+        "BLA_W_LP frame must be auto-detected as a keyframe by encode_video: {:?}",
+        result.err()
+    );
+    muxer.finish().expect("finish should succeed");
+    assert!(!buffer.lock().unwrap().is_empty());
+}
+
+/// Regression test: H264 consecutive Annex B start codes produce empty NAL slices.
+/// api::is_keyframe must not panic on these.
+#[test]
+fn h264_encode_video_no_panic_on_consecutive_start_codes() {
+    let (writer, buffer) = SharedBuffer::new();
+
+    let mut muxer = MuxerBuilder::new(writer)
+        .video(VideoCodec::H264, 640, 480, 30.0)
+        .build()
+        .expect("build should succeed");
+
+    // Build a valid H264 keyframe with a stray consecutive start code at the start
+    // (empty NAL between the two leading start codes).
+    let mut frame = Vec::new();
+    frame.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]); // extra start code → empty NAL
+    // SPS (NAL type 7)
+    frame.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1e, 0x95, 0xa8]);
+    // PPS (NAL type 8)
+    frame.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x68, 0xce, 0x3c, 0x80]);
+    // IDR slice (NAL type 5)
+    frame.extend_from_slice(&[
+        0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x00, 0x00, 0x03, 0x00, 0x00, 0x03,
+    ]);
+
+    // Must not panic on empty NAL, and must correctly detect IDR as keyframe.
+    let result = muxer.encode_video(&frame, 33);
+    assert!(
+        result.is_ok(),
+        "H264 consecutive start codes must not panic: {:?}",
+        result.err()
+    );
+    muxer.finish().expect("finish should succeed");
+    assert!(!buffer.lock().unwrap().is_empty());
+}
+
+/// Regression test: H265 consecutive Annex B start codes produce empty NAL slices.
+/// api::is_keyframe must not panic on these.
+#[test]
+fn hevc_encode_video_no_panic_on_consecutive_start_codes() {
+    let (writer, buffer) = SharedBuffer::new();
+
+    let mut muxer = MuxerBuilder::new(writer)
+        .video(VideoCodec::H265, 640, 480, 30.0)
+        .build()
+        .expect("build should succeed");
+
+    // Prepend an extra start code to the valid HEVC keyframe fixture.
+    let mut frame = vec![0x00, 0x00, 0x00, 0x01]; // extra start code → empty NAL
+    frame.extend_from_slice(&build_hevc_keyframe());
+
+    // Must not panic on empty NAL slice, and IDR must still be detected as keyframe.
+    let result = muxer.encode_video(&frame, 33);
+    assert!(
+        result.is_ok(),
+        "HEVC consecutive start codes must not panic: {:?}",
+        result.err()
+    );
+    muxer.finish().expect("finish should succeed");
+    assert!(!buffer.lock().unwrap().is_empty());
+}

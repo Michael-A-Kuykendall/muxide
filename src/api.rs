@@ -597,7 +597,11 @@ pub struct Muxer<Writer> {
 ///
 /// All errors include context to help diagnose issues. Error messages are designed
 /// to be educational—they explain what went wrong and how to fix it.
+///
+/// This enum is `#[non_exhaustive]`: new variants may be added in minor releases.
+/// Match using a wildcard arm (`_ => ...`) for forward compatibility.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum MuxerError {
     /// Video configuration is missing.  A video track is required;
     /// call `.video()` on `MuxerBuilder` before calling `.build()`.
@@ -1067,17 +1071,19 @@ impl<Writer: Write> Muxer<Writer> {
 
         match self.video_track.codec {
             VideoCodec::H264 => {
-                // Check for IDR NAL (type 5)
-                let has_idr = AnnexBNalIter::new(data).any(|nal| (nal[0] & 0x1f) == 5);
-                has_idr
+                // Check for IDR NAL (type 5); skip empty NAL slices that can arise
+                // from consecutive Annex B start codes in encoder output.
+                AnnexBNalIter::new(data).any(|nal| !nal.is_empty() && (nal[0] & 0x1f) == 5)
             }
             VideoCodec::H265 => {
-                // Check for IDR NAL (type 19-21)
-                let has_idr = AnnexBNalIter::new(data).any(|nal| {
-                    let nal_type = (nal[0] >> 1) & 0x3f;
-                    (19..=21).contains(&nal_type)
-                });
-                has_idr
+                // IRAP NAL types: BLA (16-18), IDR (19-20), CRA (21).
+                // Skip empty NAL slices that can arise from consecutive start codes.
+                AnnexBNalIter::new(data).any(|nal| {
+                    !nal.is_empty() && {
+                        let t = (nal[0] >> 1) & 0x3f;
+                        (16..=21).contains(&t)
+                    }
+                })
             }
             VideoCodec::Av1 => is_av1_keyframe(data),
             VideoCodec::Vp9 => is_vp9_keyframe(data).unwrap_or(false),

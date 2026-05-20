@@ -226,7 +226,7 @@ pub fn extract_vp9_config(keyframe: &[u8]) -> Option<Vp9Config> {
     // full_range_flag (color_range in VP9 spec): 1 bit when color_space != sRGB (7)
     // For profiles 1/3 there are also subsampling bits, which we skip.
     let full_range_flag: u8 = if color_space != 7 {
-        let cr = r.read_bit()? as u8;
+        let cr = r.read_bit()?;
         if profile == 1 || profile == 3 {
             r.read_bit()?; // subsampling_x
             r.read_bit()?; // subsampling_y

@@ -270,11 +270,8 @@ pub fn is_hevc_keyframe(data: &[u8]) -> bool {
         }
     }
 
-    assert_invariant!(
-        AnnexBNalIter::new(data).count() > 0,
-        "INV-505: HEVC keyframe detection must find at least one NAL unit"
-    );
-
+    // If we found no NAL units, the data either had no Annex B start codes or
+    // all NALs were of non-IRAP types. Neither case is a keyframe.
     false
 }
 
@@ -385,6 +382,45 @@ mod tests {
             0x00, 0x00, 0x00, 0x01, 0x02, 0x01, // TRAIL_R (type 1)
         ];
         assert!(!is_hevc_keyframe(&trail));
+    }
+
+    #[test]
+    fn test_is_hevc_keyframe_bla_types_are_irap() {
+        // BLA_W_LP (type 16) = 0x20 >> 1 → (0x20 >> 1) & 0x3f = 16
+        // NAL header byte: type 16 → first_byte = (16 << 1) = 0x20
+        let bla_w_lp = [0x00, 0x00, 0x00, 0x01, 0x20, 0x01];
+        assert!(is_hevc_keyframe(&bla_w_lp), "BLA_W_LP (type 16) must be detected as keyframe");
+
+        // BLA_W_RADL (type 17) → first_byte = (17 << 1) = 0x22
+        let bla_w_radl = [0x00, 0x00, 0x00, 0x01, 0x22, 0x01];
+        assert!(is_hevc_keyframe(&bla_w_radl), "BLA_W_RADL (type 17) must be detected as keyframe");
+
+        // BLA_N_LP (type 18) → first_byte = (18 << 1) = 0x24
+        let bla_n_lp = [0x00, 0x00, 0x00, 0x01, 0x24, 0x01];
+        assert!(is_hevc_keyframe(&bla_n_lp), "BLA_N_LP (type 18) must be detected as keyframe");
+
+        // CRA (type 21) → first_byte = (21 << 1) = 0x2a
+        let cra = [0x00, 0x00, 0x00, 0x01, 0x2a, 0x01];
+        assert!(is_hevc_keyframe(&cra), "CRA (type 21) must be detected as keyframe");
+    }
+
+    #[test]
+    fn test_is_hevc_keyframe_no_panic_on_no_start_codes() {
+        // Data with no Annex B start codes: must return false, NOT panic (regression for INV-505)
+        let raw = [0x42, 0x01, 0x01, 0x21, 0x80, 0x00];
+        assert!(!is_hevc_keyframe(&raw), "non-Annex-B data must return false, not panic");
+    }
+
+    #[test]
+    fn test_is_hevc_keyframe_no_panic_on_consecutive_start_codes() {
+        // Consecutive start codes produce an empty NAL slice; must not panic
+        let consecutive = [
+            0x00, 0x00, 0x00, 0x01, // start code
+            0x00, 0x00, 0x00, 0x01, // consecutive start code → empty NAL between them
+            0x26, 0x01, // IDR_W_RADL payload
+        ];
+        // The IDR NAL is still present; keyframe detection should succeed
+        assert!(is_hevc_keyframe(&consecutive));
     }
 
     #[test]

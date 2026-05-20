@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.5 (May 19, 2026) - Safety Fixes: Empty-NAL Panics, HEVC BLA Keyframes, Non-Exhaustive Error
+
+### 🐛 **Bug Fixes**
+- **`encode_video` could panic on H.264/H.265 streams with consecutive Annex B start codes**: `AnnexBNalIter` can yield empty `&[u8]` slices when two start codes appear back-to-back (which some encoders emit). The H.264 branch of `is_keyframe()` accessed `nal[0]` unconditionally, and the H.265 branch did the same. Both now guard with `!nal.is_empty()` before indexing. Added regression tests for both codecs.
+- **`encode_video` failed to detect HEVC BLA frames as keyframes**: The H.265 branch of `is_keyframe()` only checked NAL types 19–21 (IDR + CRA), missing BLA types 16–18 (`BLA_W_LP`, `BLA_W_RADL`, `BLA_N_LP`). All three are IRAP frames and must be treated as keyframes. Range corrected to `16..=21`. Added regression test.
+- **`is_hevc_keyframe()` panicked on data with no Annex B start codes**: An `assert_invariant!` at the function's exit path (INV-505) fired whenever the data contained no NAL units, which can happen when validation code is given malformed or non-Annex-B input. Replaced with a graceful `false` return. Added unit test.
+- **Redundant `as u8` cast in VP9 parser** (`vp9.rs:229`): `read_bit()` already returns `u8`; the cast was flagged by `clippy::cast_lossless`. Removed.
+
+### 🔒 **API Correctness**
+- **`MuxerError` was not `#[non_exhaustive]`**: Adding error variants in a minor release would have been a breaking change for downstream code using exhaustive `match` arms. Attribute added along with a doc note advising callers to use a wildcard arm.
+
+### 🔑 **Discoverability**
+- **`Cargo.toml` keywords**: Replaced the generic `"multimedia"` keyword with `"hevc"` — a primary codec supported by the crate and a far more targeted search term on crates.io.
+
 ## 0.2.4 (May 19, 2026) - Test Rename, Benchmark Repair, Doc Consistency
 
 ### 🐛 **Bug Fixes**
