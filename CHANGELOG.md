@@ -1,5 +1,42 @@
 # Changelog
 
+## [Unreleased] - Audit Pass 1: MP4 Spec Compliance, Codec Box Correctness
+
+### 🐛 **Critical Bug Fixes**
+- **`build_vpcc_fmp4` emitted a malformed vpcC box** (`fragmented.rs`): missing FullBox header (version + flags), wrong bit-packing for the `bit_depth/chroma_subsampling/full_range_flag` byte, and missing `codecInitializationDataSize` field. All three issues fixed.
+- **`build_hvcc_fmp4` emitted all-zero profile/level fields** (`fragmented.rs`): now extracts `general_profile_idc`, `general_tier_flag`, `general_profile_space`, and `general_level_idc` from the HEVC SPS via `HevcConfig`, matching the logic in `build_hvcc_box`.
+- **`build_av1c_fmp4` emitted all-zero codec config fields** (`fragmented.rs`): now parses `seq_profile`, `seq_level_idx`, `seq_tier`, `high_bitdepth`, monochrome, and chroma subsampling from the AV1 Sequence Header OBU via `extract_av1_config`, matching `build_av1c_box`.
+- **`build_audio_specific_config` always wrote `AudioObjectType = 2` (AAC-LC)** (`muxer/mp4.rs`): regardless of the `AacProfile` passed by the caller. Now correctly sets AOT 1 (Main), 2 (LC), 3 (SSR), 4 (LTP), 5 (HE), or 29 (HE-v2) based on the profile.
+- **`build_mdhd_box` silently truncated durations > 13.6 hours** (`muxer/mp4.rs`): the `u64 → u32` cast wrapped silently. Now uses a version-1 (64-bit) mdhd box when `duration_ms > u32::MAX`.
+- **`is_hevc_keyframe` panicked on empty input** (`codec/h265.rs`): `assert_invariant!(INV-503)` panicked instead of returning `false`. Replaced with a graceful early return.
+
+### 🔧 **MP4 Spec Compliance**
+- **`build_tkhd_box` emitted `flags = 0`** (`muxer/mp4.rs`): ISO 14496-12 §8.3.2 requires bit 0 (track_enabled) and bit 1 (track_in_movie) set. Fixed to `0x0000_0003`.
+- **`build_vmhd_box` emitted `flags = 0`** (`muxer/mp4.rs`): ISO 14496-12 §12.1.2 requires `flags = 1`. Fixed.
+- **`build_mvhd_payload` hardcoded `next_track_ID = 2`** (`muxer/mp4.rs`): even when both video and audio tracks were present. Now passes the correct value (2 for video-only, 3 for video+audio).
+
+### 🗑️ **Dead Invariants Removed**
+- **INV-201** (`codec/av1.rs`): `obu_type & 0x0f ≤ 15` — always true due to the 4-bit mask.
+- **INV-203** (`codec/av1.rs`): `!payload.is_empty()` after a prior early-return guard.
+- **INV-302** (`codec/h264.rs`): non-empty SPS/PPS check after the iterator already filtered empties.
+- **INV-401** (`codec/vp9.rs`): `frame_marker == 2` after a prior early-return guard.
+
+### ✨ **API / Code Quality**
+- **`Muxer<W>` lacked a `Debug` impl**: added manual impl exposing track counts and status without printing the writer.
+- **`MuxerBuilder<W>` lacked a `Debug` impl**: added manual impl showing video/audio config and SPS/PPS/VPS presence.
+- **`MuxerError::FirstVideoFrameMissingSpsPps` Display was H.264-only**: updated to mention H.265 NAL types 32/33/34 as well.
+- **`write_video` doc only mentioned H.264**: updated to cover all supported codecs.
+- **`encode_language_code` was duplicated** between `mp4.rs` and `fragmented.rs`: made `pub(crate)` in `mp4.rs`, removed the copy in `fragmented.rs`.
+- **`FragmentedError` was missing `#[non_exhaustive]`**: attribute added.
+- **`Vp9Config` was missing `Eq` derive**: added.
+- **`AudioValidationConfig.channels`** and **`validate_audio_config` parameter**: promoted from `u8` to `u16` to match the API (`AudioTrackConfig.channels: u16`).
+- **`invariant_ppt` module** marked `#[doc(hidden)]` (internal testing infrastructure).
+
+### 📖 **Documentation**
+- **`default_avc_config()` doc claimed "1080p @ High Profile, Level 4.0"**: corrected to "640×480 @ Baseline Profile, Level 3.0" (the actual config values).
+- **BLA NAL type doc strings were all identical** (`codec/h265.rs`): `BLA_W_LP`, `BLA_W_RADL`, and `BLA_N_LP` now have distinct descriptions.
+- **ROADMAP.md**: version updated from v0.2.3 to v0.2.5; test count corrected from "200+" to "123".
+
 ## 0.2.5 (May 19, 2026) - Safety Fixes: Empty-NAL Panics, HEVC BLA Keyframes, Non-Exhaustive Error
 
 ### 🐛 **Bug Fixes**
