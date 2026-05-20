@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] - Audit Pass 1: MP4 Spec Compliance, Codec Box Correctness
+## 0.2.5 (May 20, 2026) - MP4 Spec Compliance, Codec Box Correctness, Audio/Video Interop
 
 ### 🐛 **Critical Bug Fixes**
 - **`build_vpcc_fmp4` emitted a malformed vpcC box** (`fragmented.rs`): missing FullBox header (version + flags), wrong bit-packing for the `bit_depth/chroma_subsampling/full_range_flag` byte, and missing `codecInitializationDataSize` field. All three issues fixed.
