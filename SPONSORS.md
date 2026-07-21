@@ -16,7 +16,6 @@ Thank you to all our sponsors who help keep Muxide free forever!
 ### Developer Supporters ($25+/month)
 *Be the first!*
 
-
 ### Coffee Heroes ($5+/month)
 - alistairheath
 
@@ -25,11 +24,10 @@ Thank you to all our sponsors who help keep Muxide free forever!
 **Muxide is free forever.** No paid tiers, no enterprise upsells, no bait-and-switch.
 
 Your sponsorship helps:
-- Add new format and platform support
 - Fix bugs faster with dedicated support
 - Improve documentation and examples
-- Maintain compatibility with evolving standards
-- Expand test coverage across more formats
+- Add new features
+- Expand test coverage across more platforms
 
 ## Sponsorship Tiers
 
@@ -39,24 +37,22 @@ Your sponsorship helps:
 - Name listed in this file
 
 ### Developer Supporters - $25/month
-*Be the first!*
-
 - Everything in Coffee Heroes
 - Priority response to bug reports
-- Name + link in this file
+- Name + link in SPONSORS.md
 - Influence on roadmap priorities
 
 ### Corporate Backers - $100/month
 - Everything in Developer Supporters
 - Company logo in README (small)
-- Company logo in this file
+- Company logo in SPONSORS.md
 - Recognition in release notes
 
 ### Enterprise Partners - $500+/month
 - Everything in Corporate Backers
 - Company logo in README (prominent placement)
 - Monthly 1:1 office hours
-- Input on roadmap priorities (maintainer retains final decision)
+- Direct input on roadmap
 - Early access to new features
 - Custom integration support
 
