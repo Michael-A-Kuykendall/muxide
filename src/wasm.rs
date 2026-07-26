@@ -20,7 +20,7 @@
 
 use wasm_bindgen::prelude::*;
 
-use crate::api::{AacProfile, AudioCodec, MuxerBuilder, MuxerStats, VideoCodec as CoreVideoCodec};
+use crate::api::{AacProfile, AudioCodec, MuxerBuilder, VideoCodec as CoreVideoCodec};
 
 #[wasm_bindgen]
 pub enum VideoCodec {
