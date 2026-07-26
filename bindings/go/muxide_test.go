@@ -1,6 +1,9 @@
 package muxide
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 func TestNewMuxerWriteFinish(t *testing.T) {
 	m, err := NewMuxer(CodecH264, 1280, 720, 30.0)
@@ -32,6 +35,12 @@ func TestNewMuxerWriteFinish(t *testing.T) {
 	}
 	if len(out) == 0 {
 		t.Fatal("expected non-empty MP4 output")
+	}
+	if string(out[4:8]) != "ftyp" {
+		t.Fatal("output is not an MP4 (missing ftyp box)")
+	}
+	if !bytes.Contains(out, []byte("moov")) || !bytes.Contains(out, []byte("mdat")) {
+		t.Fatal("output is not a valid MP4 (missing moov or mdat box)")
 	}
 }
 

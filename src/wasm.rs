@@ -31,7 +31,7 @@ pub enum VideoCodec {
 }
 
 impl VideoCodec {
-    fn to_core(self) -> CoreVideoCodec {
+    fn into_core(self) -> CoreVideoCodec {
         match self {
             VideoCodec::H264 => CoreVideoCodec::H264,
             VideoCodec::H265 => CoreVideoCodec::H265,
@@ -66,7 +66,7 @@ impl WasmMuxerBuilder {
 
     pub fn video(&mut self, codec: VideoCodec, width: u32, height: u32, framerate: f64) {
         let builder = std::mem::replace(&mut self.inner, MuxerBuilder::new(Vec::new()));
-        self.inner = builder.video(codec.to_core(), width, height, framerate);
+        self.inner = builder.video(codec.into_core(), width, height, framerate);
     }
 
     pub fn audio(&mut self, codec: AudioCodecKind, sample_rate: u32, channels: u16) {
@@ -87,6 +87,12 @@ impl WasmMuxerBuilder {
             .build()
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         Ok(WasmMuxer { inner: Some(muxer) })
+    }
+}
+
+impl Default for WasmMuxerBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -154,5 +160,39 @@ impl WasmMuxer {
             .finish_in_place_with_stats()
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         Ok(muxer.into_writer())
+    }
+}
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod tests {
+    use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    #[wasm_bindgen_test]
+    fn wasm_muxer_produces_valid_mp4() {
+        let mut builder = WasmMuxerBuilder::new();
+        builder.video(VideoCodec::H264, 1280, 720, 30.0);
+        let mut muxer = builder.build().expect("build failed");
+
+        // H.264 keyframe: SPS (NAL 7) + PPS (NAL 8) + IDR (NAL 5).
+        let sps = [0x00, 0x00, 0x00, 0x01, 0x67, 0x64, 0x00, 0x1f];
+        let pps = [0x00, 0x00, 0x00, 0x01, 0x68, 0xce, 0x3c, 0x80];
+        let idr = [0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x00];
+        let mut keyframe = Vec::new();
+        keyframe.extend_from_slice(&sps);
+        keyframe.extend_from_slice(&pps);
+        keyframe.extend_from_slice(&idr);
+
+        muxer
+            .write_video(0.0, &keyframe, true)
+            .expect("write_video");
+        let out = muxer.finish().expect("finish");
+
+        assert!(out.len() > 0, "empty MP4 output");
+        assert_eq!(
+            &out[4..8],
+            b"ftyp",
+            "output is not an MP4 (missing ftyp box)"
+        );
     }
 }

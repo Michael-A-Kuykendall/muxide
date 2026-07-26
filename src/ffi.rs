@@ -37,13 +37,13 @@ fn set_error(msg: String) {
     LAST_ERROR.with(|e| *e.borrow_mut() = msg);
 }
 
-struct MuxideMuxer {
+pub struct MuxideMuxer {
     inner: Option<crate::api::Muxer<Vec<u8>>>,
     output: Vec<u8>,
     finished: bool,
 }
 
-struct MuxideFragmentedMuxer {
+pub struct MuxideFragmentedMuxer {
     inner: FragmentedMuxer,
     output: Vec<u8>,
 }

@@ -43,11 +43,16 @@ default = ["cli"]
 cli = ["dep:clap", "dep:indicatif"]
 wasm = ["wasm-bindgen"]
 
-[dev-dependencies]
+# proptest/criterion/lazy_static/tempfile do not build for wasm32, so only pull
+# them for non-wasm targets. This keeps `cargo test --target wasm32-...` working.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 lazy_static = "1.4"
 proptest = "=1.5.0"
 tempfile = "3.0"
 criterion = "0.5"
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"
 
 [[bench]]
 name = "muxing"
