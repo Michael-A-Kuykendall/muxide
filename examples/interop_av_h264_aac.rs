@@ -19,15 +19,12 @@
 
 use muxide::{
     api::{AacProfile, AudioCodec, MuxerBuilder, VideoCodec},
-    codec::{
-        common::AnnexBNalIter,
-        h264::is_h264_keyframe,
-    },
+    codec::{common::AnnexBNalIter, h264::is_h264_keyframe},
 };
 use std::{
     env,
     fs::{self, File},
-    io::{Read},
+    io::Read,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -107,13 +104,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let status = Command::new("ffmpeg")
             .args([
                 "-y",
-                "-f", "lavfi",
-                "-i", "testsrc=size=640x480:rate=30",
-                "-t", "1",
-                "-pix_fmt", "yuv420p",
-                "-c:v", "libx264",
-                "-x264-params", "aud=1:repeat-headers=1",
-                "-f", "h264",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=640x480:rate=30",
+                "-t",
+                "1",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:v",
+                "libx264",
+                "-x264-params",
+                "aud=1:repeat-headers=1",
+                "-f",
+                "h264",
                 video_path.to_str().unwrap(),
             ])
             .status()?;
@@ -124,11 +128,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let status = Command::new("ffmpeg")
             .args([
                 "-y",
-                "-f", "lavfi",
-                "-i", "sine=frequency=1000:sample_rate=44100:duration=1",
-                "-c:a", "aac",
-                "-b:a", "128k",
-                "-f", "adts",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=1000:sample_rate=44100:duration=1",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                "-f",
+                "adts",
                 audio_path.to_str().unwrap(),
             ])
             .status()?;
@@ -179,9 +188,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Interleave audio frames that fall within this video frame's time window
         let audio_start = vi * audio_total / video_total;
         let audio_end = ((vi + 1) * audio_total / video_total).min(audio_total);
-        for ai in audio_start..audio_end {
-            let audio_pts = ai as f64 * 1024.0 / 44100.0; // 1024 samples/frame at 44100 Hz
-            muxer.write_audio(audio_pts, &audio_frames[ai])?;
+        for (ai, frame) in audio_frames
+            .iter()
+            .enumerate()
+            .skip(audio_start)
+            .take(audio_end - audio_start)
+        {
+            let audio_pts = ai as f64 * 1024.0 / 44100.0;
+            muxer.write_audio(audio_pts, frame)?;
         }
     }
 
@@ -193,9 +207,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n--- ffprobe validation ---");
     let ffprobe_out = Command::new("ffprobe")
         .args([
-            "-v", "error",
+            "-v",
+            "error",
             "-show_streams",
-            "-of", "compact",
+            "-of",
+            "compact",
             out_path.to_str().unwrap(),
         ])
         .output()?;
@@ -204,9 +220,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for line in stdout.lines() {
         let fields: Vec<&str> = line.split('|').collect();
         let extract = |key: &str| -> &str {
-            fields.iter()
+            fields
+                .iter()
                 .find(|f| f.starts_with(key) && f[key.len()..].starts_with('='))
-                .and_then(|f| f.splitn(2, '=').nth(1))
+                .and_then(|f| f.split_once('=').map(|x| x.1))
                 .unwrap_or("?")
         };
         println!(

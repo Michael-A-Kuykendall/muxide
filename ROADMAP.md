@@ -3,7 +3,7 @@
 Muxide is a minimal-dependency, pure-Rust MP4 muxer.
 Its mission is **simple muxing done right**: encoded frames in, playable MP4 out.
 
-## Current Status: v0.2.5 ✅
+## Current Status: v0.2.6 ✅
 
 ### Core Features (v0.1.0 – v0.2.1)
 - ✅ H.264/AVC video muxing (Annex B format)
@@ -65,6 +65,8 @@ Its mission is **simple muxing done right**: encoded frames in, playable MP4 out
 ---
 
 ## Recent Achievements
+- **v0.2.6**: Production audit - fixed silent fallback to default AVC config for non-H.264 codecs, removed dead code, fixed clippy warnings, improved CI (removed daily cron, nightly now runs on releases)
+- **v0.2.5**: MP4 spec compliance fixes, codec box correctness (vpcC, hvcC, av1C, mp4a), audio/video interop improvements
 - **v0.2.3**: Documentation cleanup, dead code removal, and ANSI codes removed from the ADTS error hex dump
 - **v0.2.2/v0.2.3**: Correctness fixes, DRY improvements, and API cleanup
 - **Codebase Cleanup**: Removed external crate references, focused on core muxing functionality

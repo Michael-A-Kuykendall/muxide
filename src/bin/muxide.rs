@@ -152,23 +152,12 @@ enum Commands {
     },
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 struct MuxStats {
     video_frames: u64,
     audio_frames: u64,
     total_bytes: u64,
     duration_ms: u64,
-}
-
-impl MuxStats {
-    fn new() -> Self {
-        Self {
-            video_frames: 0,
-            audio_frames: 0,
-            total_bytes: 0,
-            duration_ms: 0,
-        }
-    }
 }
 
 struct ProgressReporter {
@@ -195,7 +184,7 @@ impl ProgressReporter {
 
         Self {
             progress,
-            stats: MuxStats::new(),
+            stats: MuxStats::default(),
         }
     }
 
@@ -790,7 +779,11 @@ fn validate_hex_file(path: &std::path::Path, file_type: &str) -> Result<String> 
     let bytes = read_hex_bytes(&content)
         .with_context(|| format!("{file_type} file contains invalid hex"))?;
 
-    Ok(format!("{} file is valid hex ({} bytes)", file_type, bytes.len()))
+    Ok(format!(
+        "{} file is valid hex ({} bytes)",
+        file_type,
+        bytes.len()
+    ))
 }
 
 fn info_command(input: PathBuf, verbose: bool, json: bool) -> Result<()> {

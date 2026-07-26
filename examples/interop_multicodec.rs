@@ -95,8 +95,7 @@ fn parse_ivf_frames(data: &[u8]) -> Vec<(u64, Vec<u8>)> {
     let mut frames = Vec::new();
     let mut pos = 32usize;
     while pos + 12 <= data.len() {
-        let frame_size =
-            u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
+        let frame_size = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
         let pts = u64::from_le_bytes(data[pos + 4..pos + 12].try_into().unwrap());
         pos += 12;
         if pos + frame_size > data.len() {
@@ -116,13 +115,20 @@ fn run_h265(out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
 
     run_ffmpeg(&[
         "-y",
-        "-f", "lavfi",
-        "-i", "testsrc=size=640x480:rate=30",
-        "-t", "1",
-        "-pix_fmt", "yuv420p",
-        "-c:v", "libx265",
-        "-x265-params", "aud=1:repeat-headers=1:keyint=30",
-        "-f", "hevc",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc=size=640x480:rate=30",
+        "-t",
+        "1",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:v",
+        "libx265",
+        "-x265-params",
+        "aud=1:repeat-headers=1:keyint=30",
+        "-f",
+        "hevc",
         raw_path.to_str().unwrap(),
     ])?;
 
@@ -150,13 +156,20 @@ fn run_vp9(out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
 
     run_ffmpeg(&[
         "-y",
-        "-f", "lavfi",
-        "-i", "testsrc=size=640x480:rate=30",
-        "-t", "1",
-        "-pix_fmt", "yuv420p",
-        "-c:v", "libvpx-vp9",
-        "-g", "30",
-        "-f", "ivf",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc=size=640x480:rate=30",
+        "-t",
+        "1",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:v",
+        "libvpx-vp9",
+        "-g",
+        "30",
+        "-f",
+        "ivf",
         ivf_path.to_str().unwrap(),
     ])?;
 
@@ -186,14 +199,22 @@ fn run_av1(out_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     // -cpu-used 8 = fastest libaom preset; -g 30 = one keyframe per second
     run_ffmpeg(&[
         "-y",
-        "-f", "lavfi",
-        "-i", "testsrc=size=640x480:rate=30",
-        "-t", "1",
-        "-pix_fmt", "yuv420p",
-        "-c:v", "libaom-av1",
-        "-cpu-used", "8",
-        "-g", "30",
-        "-f", "ivf",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc=size=640x480:rate=30",
+        "-t",
+        "1",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:v",
+        "libaom-av1",
+        "-cpu-used",
+        "8",
+        "-g",
+        "30",
+        "-f",
+        "ivf",
         ivf_path.to_str().unwrap(),
     ])?;
 

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.6 (July 26, 2026) - Production Audit: Code Quality & CI Hardening
+
+### 🐛 **Critical Bug Fixes**
+- **Silent fallback to default H.264 config for non-H.264 codecs** (`muxer/mp4.rs`): When `finalize()` was called without extracted codec config (e.g., H.265/AV1/VP9 with no frames), the code silently fell back to a default H.264 AVC config, producing a broken MP4. Now returns a descriptive `io::Error` explaining that codec parameter sets are required.
+
+### 🔧 **Code Quality**
+- **Clippy: `needless_range_loop`** (`examples/interop_av_h264_aac.rs:182`): Replaced index-based loop with iterator + enumerate for idiomatic Rust.
+- **Clippy: `manual_split_once`** (`examples/interop_av_h264_aac.rs:209`): Replaced `splitn(2, '=').nth(1)` with `split_once('=').map(|x| x.1)`.
+- **Dead code: `build_moof()` wrapper** (`fragmented.rs`): Removed unused wrapper function; call site now uses `build_moof_with_offset` directly.
+- **Unused parameter: `_timescale`** (`fragmented.rs:769`): Removed unused parameter from `build_media_segment`.
+- **Manual `new()` instead of `Default`** (`bin/muxide.rs:156`): `MuxStats` now derives `Default` instead of implementing a manual `new()` method.
+- **Missing context in `assert_invariant!`** (`codec/h265.rs:191`): Added missing context string `"codec::h265::extract_hevc_config"` to 2-arg macro call.
+
+### 📝 **Documentation Fixes**
+- **Misleading "approximate" comment** (`muxer/mp4.rs:2439`): Removed comment claiming `format_unix_timestamp` was approximate; the algorithm is exact.
+- **Misleading "~2100" limit comment** (`muxer/mp4.rs:2462`): Removed comment claiming `days_to_ymd` only works until ~2100; the algorithm works for any u64-representable date.
+
+### 🚀 **CI/CD Improvements**
+- **Removed daily cron schedule** (`.github/workflows/ci.yml`): CI no longer runs on a daily schedule; only runs on push to main/master, pull requests, and tag pushes (deploy).
+- **Nightly job now runs on release tags** (`.github/workflows/ci.yml`): Changed from `schedule` trigger to `startsWith(github.ref, 'refs/tags/v')` so comprehensive testing runs on releases.
+
 ## 0.2.5 (May 20, 2026) - MP4 Spec Compliance, Codec Box Correctness, Audio/Video Interop
 
 ### 🐛 **Critical Bug Fixes**

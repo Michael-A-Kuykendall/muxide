@@ -172,7 +172,7 @@ fn h264_encode_video_no_panic_on_consecutive_start_codes() {
     // (empty NAL between the two leading start codes).
     let mut frame = Vec::new();
     frame.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]); // extra start code → empty NAL
-    // SPS (NAL type 7)
+                                                        // SPS (NAL type 7)
     frame.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1e, 0x95, 0xa8]);
     // PPS (NAL type 8)
     frame.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x68, 0xce, 0x3c, 0x80]);

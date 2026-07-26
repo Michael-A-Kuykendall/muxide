@@ -641,18 +641,25 @@ impl<Writer: Write> Mp4Writer<Writer> {
             .clone()
             .or_else(|| {
                 if self.video_samples.is_empty() {
-                    // Default config based on codec type
                     match self.video_codec {
                         VideoCodec::H264 => Some(VideoConfig::Avc(default_avc_config())),
-                        VideoCodec::H265 => None, // No default for HEVC, must have frames
-                        VideoCodec::Av1 => None,  // No default for AV1, must have frames
-                        VideoCodec::Vp9 => None,  // No default for VP9, must have frames
+                        VideoCodec::H265 => None,
+                        VideoCodec::Av1 => None,
+                        VideoCodec::Vp9 => None,
                     }
                 } else {
                     None
                 }
             })
-            .unwrap_or_else(|| VideoConfig::Avc(default_avc_config()));
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "no video configuration available for {}: first keyframe must contain codec parameter sets",
+                        self.video_codec
+                    ),
+                )
+            })?;
 
         if fast_start {
             self.finalize_fast_start(video, metadata, &video_config)
@@ -1461,7 +1468,11 @@ fn build_mp4a_box(audio: &Mp4AudioTrack) -> Vec<u8> {
 
 fn build_esds_box(audio: &Mp4AudioTrack) -> Vec<u8> {
     let asc = {
-        let profile = if let AudioCodec::Aac(p) = audio.codec { p } else { AacProfile::Lc };
+        let profile = if let AudioCodec::Aac(p) = audio.codec {
+            p
+        } else {
+            AacProfile::Lc
+        };
         build_audio_specific_config(audio.sample_rate, audio.channels, profile)
     };
 
@@ -1524,10 +1535,10 @@ fn build_audio_specific_config(sample_rate: u32, channels: u16, profile: AacProf
     // beyond the two-byte ASC; the AOT is still encoded correctly here.
     let aot: u8 = match profile {
         AacProfile::Main => 1,
-        AacProfile::Lc   => 2,
-        AacProfile::Ssr  => 3,
-        AacProfile::Ltp  => 4,
-        AacProfile::He   => 5,
+        AacProfile::Lc => 2,
+        AacProfile::Ssr => 3,
+        AacProfile::Ltp => 4,
+        AacProfile::He => 5,
         AacProfile::Hev2 => 29,
     };
     let chan = (channels.min(15) as u8) & 0x0f;
@@ -2164,8 +2175,8 @@ fn build_vpcc_box(vp9_config: &Vp9Config) -> Vec<u8> {
     payload.push(vp9_config.profile);
     payload.push(vp9_config.level);
     payload.push(depth_chroma_range);
-    payload.push(vp9_config.color_space);         // colourPrimaries
-    payload.push(vp9_config.transfer_function);   // transferCharacteristics
+    payload.push(vp9_config.color_space); // colourPrimaries
+    payload.push(vp9_config.transfer_function); // transferCharacteristics
     payload.push(vp9_config.matrix_coefficients); // matrixCoefficients
     payload.extend_from_slice(&0u16.to_be_bytes()); // codecInitializationDataSize = 0
     build_box(b"vpcC", &payload)
@@ -2435,8 +2446,6 @@ fn build_meta_hdlr_box() -> Vec<u8> {
 }
 
 fn format_unix_timestamp(unix_secs: u64) -> String {
-    // Simple conversion - days since epoch calculation
-    // This is approximate but good enough for metadata
     const SECS_PER_MIN: u64 = 60;
     const SECS_PER_HOUR: u64 = 3600;
     const SECS_PER_DAY: u64 = 86400;
@@ -2459,7 +2468,6 @@ fn format_unix_timestamp(unix_secs: u64) -> String {
 }
 
 fn days_to_ymd(days: u64) -> (u32, u32, u32) {
-    // Simplified algorithm - works for dates from 1970 to ~2100
     let mut remaining_days = days as i64;
     let mut year = 1970u32;
 
@@ -2778,20 +2786,41 @@ mod tests {
     #[test]
     fn build_audio_specific_config_standard_rates() {
         // Test standard AAC sample rates (AAC-LC profile)
-        assert_eq!(build_audio_specific_config(44100, 2, AacProfile::Lc), [0x12, 0x10]); // 44100 Hz, stereo
-        assert_eq!(build_audio_specific_config(48000, 2, AacProfile::Lc), [0x11, 0x90]); // 48000 Hz, stereo
-        assert_eq!(build_audio_specific_config(22050, 1, AacProfile::Lc), [0x13, 0x88]); // 22050 Hz, mono
-        assert_eq!(build_audio_specific_config(8000, 1, AacProfile::Lc), [0x15, 0x88]); // 8000 Hz, mono
+        assert_eq!(
+            build_audio_specific_config(44100, 2, AacProfile::Lc),
+            [0x12, 0x10]
+        ); // 44100 Hz, stereo
+        assert_eq!(
+            build_audio_specific_config(48000, 2, AacProfile::Lc),
+            [0x11, 0x90]
+        ); // 48000 Hz, stereo
+        assert_eq!(
+            build_audio_specific_config(22050, 1, AacProfile::Lc),
+            [0x13, 0x88]
+        ); // 22050 Hz, mono
+        assert_eq!(
+            build_audio_specific_config(8000, 1, AacProfile::Lc),
+            [0x15, 0x88]
+        ); // 8000 Hz, mono
     }
 
     #[test]
     fn build_audio_specific_config_edge_cases() {
         // Test non-standard rate (should default to 44100)
-        assert_eq!(build_audio_specific_config(12345, 2, AacProfile::Lc), [0x12, 0x10]);
+        assert_eq!(
+            build_audio_specific_config(12345, 2, AacProfile::Lc),
+            [0x12, 0x10]
+        );
 
         // Test channel limits (max 15 channels)
-        assert_eq!(build_audio_specific_config(44100, 16, AacProfile::Lc), [0x12, 0x78]); // 15 channels max
-        assert_eq!(build_audio_specific_config(44100, 0, AacProfile::Lc), [0x12, 0x00]); // 0 channels
+        assert_eq!(
+            build_audio_specific_config(44100, 16, AacProfile::Lc),
+            [0x12, 0x78]
+        ); // 15 channels max
+        assert_eq!(
+            build_audio_specific_config(44100, 0, AacProfile::Lc),
+            [0x12, 0x00]
+        ); // 0 channels
     }
 
     #[test]

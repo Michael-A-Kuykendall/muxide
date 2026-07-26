@@ -71,7 +71,11 @@ struct Vp9BitReader<'a> {
 
 impl<'a> Vp9BitReader<'a> {
     fn new(data: &'a [u8]) -> Self {
-        Self { data, byte_pos: 0, bit_pos: 0 }
+        Self {
+            data,
+            byte_pos: 0,
+            bit_pos: 0,
+        }
     }
 
     fn read_bit(&mut self) -> Option<u8> {
@@ -208,7 +212,11 @@ pub fn extract_vp9_config(keyframe: &[u8]) -> Option<Vp9Config> {
     // bit_depth: fixed at 8 for profiles 0/1; read ten_or_twelve_bit for profiles 2/3
     let bit_depth: u8 = if profile >= 2 {
         let ten_or_twelve = r.read_bit()?;
-        if ten_or_twelve != 0 { 12 } else { 10 }
+        if ten_or_twelve != 0 {
+            12
+        } else {
+            10
+        }
     } else {
         8
     };

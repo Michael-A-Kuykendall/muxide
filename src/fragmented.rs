@@ -205,12 +205,8 @@ impl FragmentedMuxer {
         }
 
         let samples = std::mem::take(&mut self.samples);
-        let segment = build_media_segment(
-            &samples,
-            self.sequence_number,
-            self.base_media_decode_time,
-            self.config.timescale,
-        );
+        let segment =
+            build_media_segment(&samples, self.sequence_number, self.base_media_decode_time);
 
         // Update state for next segment
         self.sequence_number += 1;
@@ -221,7 +217,8 @@ impl FragmentedMuxer {
                 let avg_duration = duration_total / (samples.len() as u64 - 1);
                 self.base_media_decode_time = last.dts + avg_duration;
             } else {
-                self.base_media_decode_time = last.dts + FALLBACK_FRAME_DURATION_TICKS; // 1 frame at 30fps
+                self.base_media_decode_time = last.dts + FALLBACK_FRAME_DURATION_TICKS;
+                // 1 frame at 30fps
             }
         }
 
@@ -608,18 +605,28 @@ fn build_hvcc_fmp4(config: &FragmentConfig) -> Vec<u8> {
         | (general_profile_idc & 0x1f);
 
     let mut payload = vec![
-        1,      // configuration_version
-        byte1,  // general_profile_space/tier/idc
-        0x60, 0x00, 0x00, 0x00, // general_profile_compatibility_flags (Main profile)
-        0x90, 0x00, 0x00, 0x00, 0x00, 0x00, // general_constraint_indicator_flags
+        1,     // configuration_version
+        byte1, // general_profile_space/tier/idc
+        0x60,
+        0x00,
+        0x00,
+        0x00, // general_profile_compatibility_flags (Main profile)
+        0x90,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00, // general_constraint_indicator_flags
         general_level_idc,
-        0xf0, 0x00, // min_spatial_segmentation_idc (reserved=0xf + 12-bit value=0)
-        0xfc,       // parallelismType (reserved=0xfc)
-        0xfd,       // chromaFormat (reserved=0xfc | 4:2:0)
-        0xf8,       // bitDepthLumaMinus8 (reserved=0xf8 | 0)
-        0xf8,       // bitDepthChromaMinus8 (reserved=0xf8 | 0)
-        0, 0,       // avgFrameRate (unspecified)
-        0x07,       // constantFrameRate=0, numTemporalLayers=0, temporalIdNested=1, lengthSizeMinusOne=3
+        0xf0,
+        0x00, // min_spatial_segmentation_idc (reserved=0xf + 12-bit value=0)
+        0xfc, // parallelismType (reserved=0xfc)
+        0xfd, // chromaFormat (reserved=0xfc | 4:2:0)
+        0xf8, // bitDepthLumaMinus8 (reserved=0xf8 | 0)
+        0xf8, // bitDepthChromaMinus8 (reserved=0xf8 | 0)
+        0,
+        0,    // avgFrameRate (unspecified)
+        0x07, // constantFrameRate=0, numTemporalLayers=0, temporalIdNested=1, lengthSizeMinusOne=3
         num_arrays,
     ];
 
@@ -750,9 +757,9 @@ fn build_vpcc_fmp4(config: &FragmentConfig) -> Vec<u8> {
         payload.push(vp9.profile);
         payload.push(vp9.level);
         payload.push(depth_chroma_range);
-        payload.push(vp9.color_space);           // colourPrimaries
-        payload.push(vp9.transfer_function);     // transferCharacteristics
-        payload.push(vp9.matrix_coefficients);   // matrixCoefficients
+        payload.push(vp9.color_space); // colourPrimaries
+        payload.push(vp9.transfer_function); // transferCharacteristics
+        payload.push(vp9.matrix_coefficients); // matrixCoefficients
         payload.extend_from_slice(&0u16.to_be_bytes()); // codecInitializationDataSize = 0
     }
     build_box(b"vpcC", &payload)
@@ -766,13 +773,12 @@ fn build_media_segment(
     samples: &[FragmentSample],
     sequence_number: u32,
     base_media_decode_time: u64,
-    _timescale: u32, // Reserved for future use (duration calculations)
 ) -> Vec<u8> {
     // Calculate total mdat size
     let mdat_payload_size: usize = samples.iter().map(|s| s.data.len()).sum();
 
     // Build moof first to get its size
-    let moof = build_moof(samples, sequence_number, base_media_decode_time);
+    let moof = build_moof_with_offset(samples, sequence_number, base_media_decode_time, 0);
     let moof_size = moof.len() as u32;
 
     // Data offset is moof_size + mdat_header(8)
@@ -801,14 +807,6 @@ fn build_media_segment(
     }
 
     segment
-}
-
-fn build_moof(
-    samples: &[FragmentSample],
-    sequence_number: u32,
-    base_media_decode_time: u64,
-) -> Vec<u8> {
-    build_moof_with_offset(samples, sequence_number, base_media_decode_time, 0)
 }
 
 fn build_moof_with_offset(

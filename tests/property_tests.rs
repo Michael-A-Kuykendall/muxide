@@ -435,9 +435,7 @@ mod contract_tests {
         // INV-302 was a dead invariant (SPS/PPS already filtered) and was removed
         contract_test(
             "codec::h264::extract_avc_config",
-            &[
-                "INV-301: H.264 NAL type must be valid (0-31)",
-            ],
+            &["INV-301: H.264 NAL type must be valid (0-31)"],
         );
     }
 
@@ -458,9 +456,7 @@ mod contract_tests {
         // INV-401 was a dead invariant (frame_marker already checked) and was removed
         contract_test(
             "codec::vp9::extract_vp9_config",
-            &[
-                "INV-402: VP9 profile must be valid (0-3)",
-            ],
+            &["INV-402: VP9 profile must be valid (0-3)"],
         );
     }
 
