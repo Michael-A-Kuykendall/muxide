@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.0 (unreleased) - WASM, Go & C Language Bindings
+
+### ✨ **New Features**
+- **WASM bindings** (`wasm` feature, `src/wasm.rs`): compile the muxer to WebAssembly via wasm-bindgen. `WasmMuxerBuilder` / `WasmMuxer` expose video/audio configuration and frame writing from JS/TS.
+- **C FFI layer** (`src/ffi.rs` + `bindings/muxide.h`): a stable C ABI with 18 `extern "C"` functions, opaque `MuxideMuxer` / `MuxideFragmentedMuxer` handles, and error-code constants. Enables embedding Muxide in any C-ABI language.
+- **Go bindings** (`bindings/go`): idiomatic Go wrapper over the C FFI using cgo, with `runtime.SetFinalizer` handle management and Rust error propagation. A `go.mod` (module `github.com/Michael-A-Kuykendall/muxide`) lets `go build ./bindings/go/...` resolve from the repo root.
+- **CI**: added a `wasm-check` job that builds the wasm32 target on every push/PR.
+
+### 🔒 **Security**
+- **Bumped `rand` 0.8.5 → 0.8.6** (RUSTSEC-2026-0097, low). `rand` is a transitive dev-dependency via `proptest`. No code changes required; resolves the Dependabot alert on the default branch.
+
+### 🧪 **Testing**
+- Added end-to-end functional tests for the new bindings: a Rust FFI integration test (`tests/ffi_smoke.rs`), a strengthened Go test that validates MP4 structure, and a wasm-bindgen test run via `wasm-bindgen-test-runner`.
+- Exposed `MuxideMuxer` / `MuxideFragmentedMuxer` as `pub` (opaque handles) so external crates can hold the pointers.
+- Target-gated non-wasm dev-dependencies so `cargo test --target wasm32-unknown-unknown` compiles; aligned `wasm-bindgen` to 0.2.108 for the test runner.
+
 ## 0.2.6 (July 26, 2026) - Production Audit: Code Quality & CI Hardening
 
 ### 🐛 **Critical Bug Fixes**
