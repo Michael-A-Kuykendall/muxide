@@ -63,3 +63,10 @@ pub mod validation;
 // Invariant PPT testing framework (internal; not part of the public API)
 #[doc(hidden)]
 pub mod invariant_ppt;
+
+// C FFI layer for language bindings (Go, Python, etc.)
+pub mod ffi;
+
+// WebAssembly bindings (enabled with `wasm` feature)
+#[cfg(feature = "wasm")]
+pub mod wasm;

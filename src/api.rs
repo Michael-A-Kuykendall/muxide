@@ -1175,6 +1175,14 @@ impl<Writer: Write> Muxer<Writer> {
     pub fn finish_with_stats(mut self) -> Result<MuxerStats, MuxerError> {
         self.finish_in_place_with_stats()
     }
+
+    /// Consume the muxer and return the underlying writer.
+    ///
+    /// Useful for retrieving the output bytes after calling
+    /// [`finish_in_place`](Self::finish_in_place) when the writer is `Vec<u8>`.
+    pub fn into_writer(self) -> Writer {
+        self.writer.into_writer()
+    }
 }
 
 // Static assertions for thread safety

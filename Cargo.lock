@@ -450,6 +450,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
+ "wasm-bindgen",
 ]
 
 [[package]]

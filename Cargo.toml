@@ -35,6 +35,11 @@ clap = { version = "4.4", features = ["derive", "color", "suggestions"] }
 indicatif = "0.17"
 anyhow = "1.0"
 thiserror = "1.0"
+wasm-bindgen = { version = "0.2", optional = true }
+
+[features]
+default = []
+wasm = ["wasm-bindgen"]
 
 [dev-dependencies]
 lazy_static = "1.4"
