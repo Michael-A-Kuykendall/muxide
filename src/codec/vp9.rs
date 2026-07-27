@@ -260,7 +260,8 @@ pub fn extract_vp9_config(keyframe: &[u8]) -> Option<Vp9Config> {
 ///
 /// Returns `true` when the top two bits of the first byte equal `10`
 /// (the mandatory VP9 `frame_marker` value of 2).
-pub fn is_valid_vp9_frame(frame: &[u8]) -> bool {
+#[cfg(test)]
+pub(crate) fn is_valid_vp9_frame(frame: &[u8]) -> bool {
     if frame.is_empty() {
         return false;
     }

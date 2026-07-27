@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use muxide::api::{AacProfile, AudioCodec, MuxerBuilder, VideoCodec};
 use std::io::Cursor;
 
@@ -49,7 +49,7 @@ fn bench_h264_muxing(c: &mut Criterion) {
                     .expect("write video sample");
             }
             muxer.finish().expect("finish muxer");
-            black_box(buffer);
+            std::hint::black_box(buffer);
         });
     });
 }
@@ -82,7 +82,7 @@ fn bench_h264_with_audio(c: &mut Criterion) {
                 muxer.write_audio(pts, &audio).expect("write audio sample");
             }
             muxer.finish().expect("finish muxer");
-            black_box(buffer);
+            std::hint::black_box(buffer);
         });
     });
 }

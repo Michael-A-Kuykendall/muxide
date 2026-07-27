@@ -89,7 +89,7 @@ pub fn validate_video_config(
     // Check codec support
     match codec {
         VideoCodec::H264 | VideoCodec::H265 | VideoCodec::Av1 | VideoCodec::Vp9 => {
-            result = result.with_message(format!("✓ Video codec {} is supported", codec));
+            result = result.with_message(format!("[OK] Video codec {} is supported", codec));
         }
     }
 
@@ -107,7 +107,10 @@ pub fn validate_video_config(
             width, height
         ));
     } else {
-        result = result.with_message(format!("✓ Video dimensions {}x{} are valid", width, height));
+        result = result.with_message(format!(
+            "[OK] Video dimensions {}x{} are valid",
+            width, height
+        ));
     }
 
     // Check framerate
@@ -119,7 +122,10 @@ pub fn validate_video_config(
             framerate
         ));
     } else {
-        result = result.with_message(format!("✓ Video framerate {:.1} fps is valid", framerate));
+        result = result.with_message(format!(
+            "[OK] Video framerate {:.1} fps is valid",
+            framerate
+        ));
     }
 
     result
@@ -136,10 +142,10 @@ pub fn validate_audio_config(
     // Check codec support
     match codec {
         AudioCodec::Aac(_) | AudioCodec::Opus => {
-            result = result.with_message(format!("✓ Audio codec {} is supported", codec));
+            result = result.with_message(format!("[OK] Audio codec {} is supported", codec));
         }
         AudioCodec::None => {
-            result = result.with_message("✓ No audio configured".to_string());
+            result = result.with_message("[OK] No audio configured".to_string());
             return result;
         }
     }
@@ -153,7 +159,10 @@ pub fn validate_audio_config(
             sample_rate
         ));
     } else {
-        result = result.with_message(format!("✓ Audio sample rate {} Hz is valid", sample_rate));
+        result = result.with_message(format!(
+            "[OK] Audio sample rate {} Hz is valid",
+            sample_rate
+        ));
     }
 
     // Check channels
@@ -165,7 +174,7 @@ pub fn validate_audio_config(
             channels
         ));
     } else {
-        result = result.with_message(format!("✓ Audio channels {} are valid", channels));
+        result = result.with_message(format!("[OK] Audio channels {} are valid", channels));
     }
 
     result
@@ -201,12 +210,12 @@ pub fn validate_video_frame(
         ));
     } else if !is_keyframe && detected_keyframe {
         result = result.with_message(format!(
-            "⚠ Frame not marked as keyframe but {} codec detection indicates it is a keyframe",
+            "[WARN] Frame not marked as keyframe but {} codec detection indicates it is a keyframe",
             codec
         ));
     } else {
         result = result.with_message(format!(
-            "✓ Frame keyframe flag matches {} codec detection",
+            "[OK] Frame keyframe flag matches {} codec detection",
             codec
         ));
     }
@@ -230,14 +239,14 @@ pub fn validate_audio_frame(codec: AudioCodec, frame_data: &[u8]) -> ValidationR
             } else if frame_data[0] != 0xFF || (frame_data[1] & 0xF0) != 0xF0 {
                 result = result.with_error("Invalid AAC ADTS syncword".to_string());
             } else {
-                result = result.with_message("✓ AAC frame has valid ADTS header".to_string());
+                result = result.with_message("[OK] AAC frame has valid ADTS header".to_string());
             }
         }
         AudioCodec::Opus => {
             if !is_valid_opus_packet(frame_data) {
                 result = result.with_error("Invalid Opus packet structure".to_string());
             } else {
-                result = result.with_message("✓ Opus packet has valid structure".to_string());
+                result = result.with_message("[OK] Opus packet has valid structure".to_string());
             }
         }
         AudioCodec::None => {
