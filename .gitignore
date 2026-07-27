@@ -21,3 +21,6 @@ Thumbs.db
 *.aac
 *.adts
 .env
+
+# beads local tool state (never commit)
+.beads/
