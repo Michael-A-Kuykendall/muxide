@@ -10,32 +10,59 @@ env:
 
 jobs:
   release:
-    name: Create Release
-    runs-on: ubuntu-latest
+    name: Build and release (${{ matrix.suffix }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            suffix: linux
+            archive: tar
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            suffix: macos
+            archive: tar
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            suffix: windows
+            archive: zip
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build release binary
-        run: cargo build --release
+      - name: Compute version
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
 
-      - name: Create release archives
+      - name: Run tests
+        run: cargo test --release
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package (Unix)
+        if: matrix.archive == 'tar'
+        shell: bash
         run: |
-          # Create tar.gz for Linux
-          tar czf muxide-linux-x86_64.tar.gz -C target/release muxide
-          
-          # Create zip for cross-platform
-          zip muxide-linux-x86_64.zip target/release/muxide
+          tar czf "muxide-${VERSION}-x86_64-${{ matrix.suffix }}.tar.gz" -C "target/${{ matrix.target }}/release" muxide
+          echo "ASSET=muxide-${VERSION}-x86_64-${{ matrix.suffix }}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Package (Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "target/${{ matrix.target }}/release/muxide.exe" -DestinationPath "muxide-${env:VERSION}-x86_64-windows.zip"
+          echo "ASSET=muxide-${env:VERSION}-x86_64-windows.zip" >> $env:GITHUB_ENV
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          files: |
-            muxide-linux-x86_64.tar.gz
-            muxide-linux-x86_64.zip
+          files: ${{ env.ASSET }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -45,7 +72,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
