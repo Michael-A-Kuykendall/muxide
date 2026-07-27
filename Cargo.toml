@@ -1,8 +1,8 @@
 [package]
 name = "muxide"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
-rust-version = "1.81"
+rust-version = "1.86"
 description = "Minimal-dependency pure-Rust MP4 muxer for recording applications. Includes CLI tool and library API."
 authors = ["Michael A. Kuykendall <michaelallenkuykendall@gmail.com>"]
 readme = "README.md"

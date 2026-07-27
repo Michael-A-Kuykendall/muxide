@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 (July 27, 2026) - Audio-Only MP4, Dependency Upgrades & MSRV Bump
+
+### ✨ New Features
+- **Audio-only MP4 and fragmented MP4 (fMP4)** (`muxide-9ue.4`): `MuxerBuilder` now accepts an audio track without a video track (and vice-versa). `FragmentedMuxer::new_audio_only()` produces an init segment with a single audio `trak` (AAC `mp4a` or Opus). Added `tests/audio_only.rs` integration coverage.
+
+### 🔧 Dependency Upgrades
+- **`thiserror` 1 → 2**, **`criterion` 0.5 → 0.8**, dropped `lazy_static`, unpinned `proptest` (`=1.5.0` → `1`). ASCII-only validation checks; gated dead `is_valid_vp9_frame()` behind `#[cfg(test)]`.
+- **MSRV bumped 1.81 → 1.86** (required by `criterion` 0.8.2). CI matrix and `MSRV Check` job updated accordingly.
+
 ## 0.3.0 (July 26, 2026) - WASM, Go & C Language Bindings
 
 ### ✨ **New Features**
