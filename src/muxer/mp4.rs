@@ -2307,7 +2307,7 @@ fn build_tkhd_box_with_id(
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&track_id.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes()); // reserved
-    payload.extend_from_slice(&duration_ms.to_be_bytes()); // duration in movie timescale (ms)
+    payload.extend_from_slice(&0u32.to_be_bytes()); // duration
     payload.extend_from_slice(&0u32.to_be_bytes()); // reserved[0]
     payload.extend_from_slice(&0u32.to_be_bytes()); // reserved[1]
     payload.extend_from_slice(&0u16.to_be_bytes());
