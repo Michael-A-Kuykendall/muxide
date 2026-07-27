@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 (unreleased) - WASM, Go & C Language Bindings
+## 0.3.0 (July 26, 2026) - WASM, Go & C Language Bindings
 
 ### ✨ **New Features**
 - **WASM bindings** (`wasm` feature, `src/wasm.rs`): compile the muxer to WebAssembly via wasm-bindgen. `WasmMuxerBuilder` / `WasmMuxer` expose video/audio configuration and frame writing from JS/TS.
