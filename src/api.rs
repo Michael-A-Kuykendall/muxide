@@ -8,7 +8,7 @@
 use crate::codec::av1::is_av1_keyframe;
 use crate::codec::common::AnnexBNalIter;
 use crate::codec::vp9::is_vp9_keyframe;
-use crate::fragmented::{FragmentConfig, FragmentedMuxer};
+use crate::fragmented::{FragmentAudioConfig, FragmentConfig, FragmentedMuxer};
 use crate::muxer::mp4::{Mp4AudioTrack, Mp4VideoTrack, Mp4Writer, Mp4WriterError, MEDIA_TIMESCALE};
 use std::fmt;
 use std::io::Write;
@@ -419,15 +419,16 @@ impl<Writer> MuxerBuilder<Writer> {
     where
         Writer: Write,
     {
-        // Video configuration is required. Audio is optional and omitting it
-        // produces a video-only MP4 (no audio track box in moov).
-        let (codec, width, height, framerate) = self.video.ok_or(MuxerError::MissingVideoConfig)?;
-        let video_track = VideoTrackConfig {
-            codec,
-            width,
-            height,
-            framerate,
-        };
+        // At least one track is required. Video-only, audio-only, and
+        // video+audio configurations are all supported.
+        let video_track = self
+            .video
+            .map(|(codec, width, height, framerate)| VideoTrackConfig {
+                codec,
+                width,
+                height,
+                framerate,
+            });
 
         let audio_track = self.audio.and_then(|(codec, sample_rate, channels)| {
             if codec == AudioCodec::None {
@@ -441,7 +442,14 @@ impl<Writer> MuxerBuilder<Writer> {
             }
         });
 
-        let mut writer = Mp4Writer::new(self.writer, video_track.codec);
+        if video_track.is_none() && audio_track.is_none() {
+            return Err(MuxerError::MissingVideoConfig);
+        }
+
+        let mut writer = match &video_track {
+            Some(video) => Mp4Writer::new(self.writer, video.codec),
+            None => Mp4Writer::new_audio_only(self.writer),
+        };
         if let Some(audio) = &audio_track {
             writer.enable_audio(Mp4AudioTrack {
                 sample_rate: audio.sample_rate,
@@ -473,16 +481,28 @@ impl<Writer> MuxerBuilder<Writer> {
     /// This creates a `FragmentedMuxer` with the configuration from this builder.
     /// Supports H.264, H.265, AV1, and VP9 video for fragmented MP4.
     /// Codec-specific parameters must be provided using the appropriate with_() methods.
-    /// Only video configuration is supported for fragmented MP4.
+    ///
+    /// When no video is configured but audio is, an audio-only fragmented
+    /// muxer is created (init segment with a single audio `trak`).
     ///
     /// # Errors
     ///
-    /// Returns an error if video configuration is missing, unsupported codec,
-    /// or required codec parameters are not provided.
+    /// Returns an error if neither video nor audio configuration is present,
+    /// the codec is unsupported, or required codec parameters are missing.
     pub fn new_with_fragment(self) -> Result<FragmentedMuxer, MuxerError> {
-        // Fragmented MP4 requires video configuration
-        let (codec, width, height, _framerate) =
-            self.video.ok_or(MuxerError::MissingVideoConfig)?;
+        // Audio-only fragmented MP4 when no video track is configured.
+        let Some((codec, width, height, _framerate)) = self.video else {
+            if let Some((audio_codec, sample_rate, channels)) = self.audio {
+                if audio_codec != AudioCodec::None {
+                    return Ok(FragmentedMuxer::new_audio_only(FragmentAudioConfig {
+                        codec: audio_codec,
+                        sample_rate,
+                        channels,
+                    }));
+                }
+            }
+            return Err(MuxerError::MissingVideoConfig);
+        };
 
         // Extract codec-specific configuration
         let (sps, pps, vps, av1_sequence_header, vp9_config) = match codec {
@@ -591,7 +611,7 @@ pub struct AudioTrackConfig {
 /// share a `Muxer<Vec<u8>>` across threads (with appropriate synchronization).
 pub struct Muxer<Writer> {
     writer: Mp4Writer<Writer>,
-    video_track: VideoTrackConfig,
+    video_track: Option<VideoTrackConfig>,
     audio_track: Option<AudioTrackConfig>,
     metadata: Option<Metadata>,
     fast_start: bool,
@@ -629,9 +649,12 @@ impl<W: fmt::Debug> fmt::Debug for Muxer<W> {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum MuxerError {
-    /// Video configuration is missing.  A video track is required;
-    /// call `.video()` on `MuxerBuilder` before calling `.build()`.
+    /// Neither video nor audio was configured. At least one track is
+    /// required; call `.video()` and/or `.audio()` on `MuxerBuilder`
+    /// before calling `.build()`.
     MissingVideoConfig,
+    /// Video was written but no video track was configured.
+    VideoNotConfigured,
     /// Low-level IO error while writing the container.
     Io(std::io::Error),
     /// The muxer has already been finished.
@@ -704,7 +727,10 @@ impl fmt::Display for MuxerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             MuxerError::MissingVideoConfig => {
-                write!(f, "missing video configuration: call .video() on MuxerBuilder before .build()")
+                write!(f, "missing track configuration: call .video() and/or .audio() on MuxerBuilder before .build()")
+            }
+            MuxerError::VideoNotConfigured => {
+                write!(f, "video track not configured: call .video() on MuxerBuilder to enable video")
             }
             MuxerError::Io(err) => write!(f, "IO error: {}", err),
             MuxerError::AlreadyFinished => {
@@ -817,6 +843,9 @@ impl<Writer: Write> Muxer<Writer> {
         if self.finished {
             return Err(MuxerError::AlreadyFinished);
         }
+        if self.video_track.is_none() {
+            return Err(MuxerError::VideoNotConfigured);
+        }
         let frame_index = self.video_frame_count;
 
         // Reject empty frames - they cause playback issues
@@ -883,6 +912,9 @@ impl<Writer: Write> Muxer<Writer> {
     ) -> Result<(), MuxerError> {
         if self.finished {
             return Err(MuxerError::AlreadyFinished);
+        }
+        if self.video_track.is_none() {
+            return Err(MuxerError::VideoNotConfigured);
         }
 
         let frame_index = self.video_frame_count;
@@ -968,6 +1000,7 @@ impl<Writer: Write> Muxer<Writer> {
             }
             Mp4WriterError::InvalidOpusPacket => MuxerError::InvalidOpusPacket { frame_index },
             Mp4WriterError::AudioNotEnabled => MuxerError::AudioNotConfigured,
+            Mp4WriterError::VideoNotEnabled => MuxerError::VideoNotConfigured,
             Mp4WriterError::DurationOverflow => MuxerError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "duration overflow",
@@ -1019,19 +1052,23 @@ impl<Writer: Write> Muxer<Writer> {
             }
         }
 
-        // Validate audio doesn't precede first video
-        if let Some(first_video) = self.first_video_pts {
-            if pts < first_video {
+        // Validate audio doesn't precede first video. This constraint only
+        // applies when a video track is configured; audio-only muxing has no
+        // video frames for audio to be ordered against.
+        if self.video_track.is_some() {
+            if let Some(first_video) = self.first_video_pts {
+                if pts < first_video {
+                    return Err(MuxerError::AudioBeforeFirstVideo {
+                        audio_pts: pts,
+                        first_video_pts: Some(first_video),
+                    });
+                }
+            } else {
                 return Err(MuxerError::AudioBeforeFirstVideo {
                     audio_pts: pts,
-                    first_video_pts: Some(first_video),
+                    first_video_pts: None,
                 });
             }
-        } else {
-            return Err(MuxerError::AudioBeforeFirstVideo {
-                audio_pts: pts,
-                first_video_pts: None,
-            });
         }
 
         let scaled_pts = (pts * MEDIA_TIMESCALE as f64).round();
@@ -1057,6 +1094,9 @@ impl<Writer: Write> Muxer<Writer> {
     /// where you need explicit timestamp control, use [`write_video`](Self::write_video)
     /// or [`write_video_with_dts`](Self::write_video_with_dts).
     pub fn encode_video(&mut self, data: &[u8], duration_ms: u32) -> Result<(), MuxerError> {
+        if self.video_track.is_none() {
+            return Err(MuxerError::VideoNotConfigured);
+        }
         if data.is_empty() {
             return Err(MuxerError::EmptyVideoFrame {
                 frame_index: self.video_frame_count,
@@ -1100,7 +1140,11 @@ impl<Writer: Write> Muxer<Writer> {
             "api::is_keyframe"
         );
 
-        match self.video_track.codec {
+        let Some(video_track) = &self.video_track else {
+            return false;
+        };
+
+        match video_track.codec {
             VideoCodec::H264 => {
                 // Check for IDR NAL (type 5); skip empty NAL slices that can arise
                 // from consecutive Annex B start codes in encoder output.
@@ -1138,12 +1182,20 @@ impl<Writer: Write> Muxer<Writer> {
         if self.finished {
             return Err(MuxerError::AlreadyFinished);
         }
-        let params = Mp4VideoTrack {
-            width: self.video_track.width,
-            height: self.video_track.height,
-        };
-        self.writer
-            .finalize(&params, self.metadata.as_ref(), self.fast_start)?;
+        match &self.video_track {
+            Some(video_track) => {
+                let params = Mp4VideoTrack {
+                    width: video_track.width,
+                    height: video_track.height,
+                };
+                self.writer
+                    .finalize(&params, self.metadata.as_ref(), self.fast_start)?;
+            }
+            None => {
+                self.writer
+                    .finalize_audio_only(self.metadata.as_ref(), self.fast_start)?;
+            }
+        }
         self.finished = true;
 
         let video_frames = self.writer.video_sample_count();

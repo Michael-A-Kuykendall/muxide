@@ -31,7 +31,7 @@ pub enum VideoConfig {
 /// Internal MP4 container writer.
 pub struct Mp4Writer<Writer> {
     writer: Writer,
-    video_codec: VideoCodec,
+    video_codec: Option<VideoCodec>,
     video_samples: Vec<SampleInfo>,
     video_prev_pts: Option<u64>,
     video_last_delta: Option<u32>,
@@ -376,6 +376,8 @@ pub enum Mp4WriterError {
     InvalidOpusPacket,
     /// Audio track is not enabled on this writer.
     AudioNotEnabled,
+    /// Video track is not enabled on this writer (audio-only output).
+    VideoNotEnabled,
     /// Computed sample duration overflowed a `u32`.
     DurationOverflow,
     /// The writer has already been finalised.
@@ -401,6 +403,7 @@ impl fmt::Display for Mp4WriterError {
             Mp4WriterError::InvalidAdtsDetailed(err) => write!(f, "{}", err),
             Mp4WriterError::InvalidOpusPacket => write!(f, "invalid Opus packet"),
             Mp4WriterError::AudioNotEnabled => write!(f, "audio track not enabled"),
+            Mp4WriterError::VideoNotEnabled => write!(f, "video track not enabled"),
             Mp4WriterError::DurationOverflow => write!(f, "sample duration overflow"),
             Mp4WriterError::AlreadyFinalized => write!(f, "writer already finalised"),
         }
@@ -412,6 +415,19 @@ impl std::error::Error for Mp4WriterError {}
 impl<Writer: Write> Mp4Writer<Writer> {
     /// Wraps the provided writer for MP4 container output.
     pub fn new(writer: Writer, video_codec: VideoCodec) -> Self {
+        Self::with_video_codec(writer, Some(video_codec))
+    }
+
+    /// Wraps the provided writer for audio-only MP4 container output.
+    ///
+    /// A writer created this way rejects video samples with
+    /// [`Mp4WriterError::VideoNotEnabled`] and must be finalised with
+    /// [`finalize_audio_only`](Self::finalize_audio_only).
+    pub fn new_audio_only(writer: Writer) -> Self {
+        Self::with_video_codec(writer, None)
+    }
+
+    fn with_video_codec(writer: Writer, video_codec: Option<VideoCodec>) -> Self {
         Self {
             writer,
             video_codec,
@@ -494,6 +510,7 @@ impl<Writer: Write> Mp4Writer<Writer> {
         if self.finalized {
             return Err(Mp4WriterError::AlreadyFinalized);
         }
+        let video_codec = self.video_codec.ok_or(Mp4WriterError::VideoNotEnabled)?;
         // DTS must be monotonically increasing (decode order)
         if let Some(prev) = self.video_prev_pts {
             if dts <= prev {
@@ -513,14 +530,14 @@ impl<Writer: Write> Mp4Writer<Writer> {
                 return Err(Mp4WriterError::FirstFrameMustBeKeyframe);
             }
             // Extract codec configuration based on video codec type
-            let config = match self.video_codec {
+            let config = match video_codec {
                 VideoCodec::H264 => extract_avc_config(data).map(VideoConfig::Avc),
                 VideoCodec::H265 => extract_hevc_config(data).map(VideoConfig::Hevc),
                 VideoCodec::Av1 => extract_av1_config(data).map(VideoConfig::Av1),
                 VideoCodec::Vp9 => extract_vp9_config(data).map(VideoConfig::Vp9),
             };
             if config.is_none() {
-                return Err(match self.video_codec {
+                return Err(match video_codec {
                     VideoCodec::Av1 => Mp4WriterError::FirstFrameMissingSequenceHeader,
                     VideoCodec::Vp9 => Mp4WriterError::FirstFrameMissingVp9Config,
                     _ => Mp4WriterError::FirstFrameMissingSpsPps,
@@ -531,7 +548,7 @@ impl<Writer: Write> Mp4Writer<Writer> {
 
         // Convert Annex B to length-prefixed format based on codec
         // AV1 uses OBU format which doesn't need conversion
-        let converted = match self.video_codec {
+        let converted = match video_codec {
             VideoCodec::H264 => annexb_to_avcc(data),
             VideoCodec::H265 => hevc_annexb_to_hvcc(data),
             VideoCodec::Av1 => data.to_vec(), // AV1 OBUs passed as-is
@@ -646,10 +663,8 @@ impl<Writer: Write> Mp4Writer<Writer> {
             .or_else(|| {
                 if self.video_samples.is_empty() {
                     match self.video_codec {
-                        VideoCodec::H264 => Some(VideoConfig::Avc(default_avc_config())),
-                        VideoCodec::H265 => None,
-                        VideoCodec::Av1 => None,
-                        VideoCodec::Vp9 => None,
+                        Some(VideoCodec::H264) => Some(VideoConfig::Avc(default_avc_config())),
+                        _ => None,
                     }
                 } else {
                     None
@@ -658,10 +673,13 @@ impl<Writer: Write> Mp4Writer<Writer> {
             .ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!(
-                        "no video configuration available for {}: first keyframe must contain codec parameter sets",
-                        self.video_codec
-                    ),
+                    match self.video_codec {
+                        Some(codec) => format!(
+                            "no video configuration available for {}: first keyframe must contain codec parameter sets",
+                            codec
+                        ),
+                        None => "no video track configured: use finalize_audio_only() for audio-only output".to_string(),
+                    },
                 )
             })?;
 
@@ -1056,6 +1074,163 @@ impl<Writer: Write> Mp4Writer<Writer> {
         Ok(())
     }
 
+    /// Finalises an audio-only MP4 file (no video track in `moov`).
+    ///
+    /// Requires audio to have been enabled with [`enable_audio`](Self::enable_audio).
+    pub fn finalize_audio_only(
+        &mut self,
+        metadata: Option<&Metadata>,
+        fast_start: bool,
+    ) -> io::Result<()> {
+        if self.finalized {
+            return Err(io::Error::other("mp4 writer already finalised"));
+        }
+        self.finalized = true;
+
+        if self.audio_track.is_none() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "audio-only finalisation requires an enabled audio track",
+            ));
+        }
+
+        if fast_start {
+            self.finalize_audio_only_fast_start(metadata)
+        } else {
+            self.finalize_audio_only_standard(metadata)
+        }
+    }
+
+    fn audio_mdat_payload_size(&self) -> io::Result<u64> {
+        let mut payload_size: u64 = 0;
+        for sample in &self.audio_samples {
+            payload_size = payload_size
+                .checked_add(sample.data.len() as u64)
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "MP4 payload size overflow")
+                })?;
+        }
+        Ok(payload_size)
+    }
+
+    fn finalize_audio_only_standard(&mut self, metadata: Option<&Metadata>) -> io::Result<()> {
+        let ftyp_box = build_ftyp_box();
+        let ftyp_len = ftyp_box.len() as u32;
+        Self::write_counted(&mut self.writer, &mut self.bytes_written, &ftyp_box)?;
+
+        let chunk_offset = if !self.audio_samples.is_empty() {
+            let payload_size = self.audio_mdat_payload_size()?;
+            let mdat_size = 8u64 + payload_size;
+            if mdat_size > u32::MAX as u64 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "MP4 MDAT box size exceeds u32::MAX",
+                ));
+            }
+            Self::write_counted(
+                &mut self.writer,
+                &mut self.bytes_written,
+                &(mdat_size as u32).to_be_bytes(),
+            )?;
+            Self::write_counted(&mut self.writer, &mut self.bytes_written, b"mdat")?;
+            for sample in &self.audio_samples {
+                Self::write_counted(&mut self.writer, &mut self.bytes_written, &sample.data)?;
+            }
+            Some(ftyp_len + 8)
+        } else {
+            None
+        };
+
+        let (chunk_offsets, samples_per_chunk) = match chunk_offset {
+            Some(offset) => (vec![offset], self.audio_samples.len() as u32),
+            None => (Vec::new(), 0),
+        };
+
+        let tables = SampleTables::from_samples(
+            &self.audio_samples,
+            chunk_offsets,
+            samples_per_chunk,
+            self.audio_last_delta,
+        );
+        let audio_track = self
+            .audio_track
+            .as_ref()
+            .expect("audio track checked in finalize_audio_only");
+        let moov_box = build_audio_only_moov_box(audio_track, &tables, metadata);
+        Self::write_counted(&mut self.writer, &mut self.bytes_written, &moov_box)
+    }
+
+    fn finalize_audio_only_fast_start(&mut self, metadata: Option<&Metadata>) -> io::Result<()> {
+        let ftyp_box = build_ftyp_box();
+        let ftyp_len = ftyp_box.len() as u64;
+
+        let mdat_payload_size = self.audio_mdat_payload_size()?;
+        let mdat_header_size = 8u64;
+        let mdat_total_size = mdat_header_size + mdat_payload_size;
+        if mdat_total_size > u32::MAX as u64 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "MP4 MDAT box size exceeds u32::MAX",
+            ));
+        }
+
+        let audio_track = self
+            .audio_track
+            .as_ref()
+            .expect("audio track checked in finalize_audio_only");
+
+        // Build moov with a placeholder chunk offset to measure its size.
+        let (placeholder_offsets, samples_per_chunk) = if self.audio_samples.is_empty() {
+            (Vec::new(), 0)
+        } else {
+            (vec![0u32], self.audio_samples.len() as u32)
+        };
+        let placeholder_tables = SampleTables::from_samples(
+            &self.audio_samples,
+            placeholder_offsets,
+            samples_per_chunk,
+            self.audio_last_delta,
+        );
+        let placeholder_moov =
+            build_audio_only_moov_box(audio_track, &placeholder_tables, metadata);
+        let moov_len = placeholder_moov.len() as u64;
+
+        let mdat_data_start = ftyp_len + moov_len + mdat_header_size;
+
+        let chunk_offsets = if self.audio_samples.is_empty() {
+            Vec::new()
+        } else {
+            if mdat_data_start > u32::MAX as u64 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "MP4 chunk offset exceeds u32::MAX",
+                ));
+            }
+            vec![mdat_data_start as u32]
+        };
+        let final_tables = SampleTables::from_samples(
+            &self.audio_samples,
+            chunk_offsets,
+            samples_per_chunk,
+            self.audio_last_delta,
+        );
+        let final_moov = build_audio_only_moov_box(audio_track, &final_tables, metadata);
+
+        // Write: ftyp → moov → mdat header → samples
+        Self::write_counted(&mut self.writer, &mut self.bytes_written, &ftyp_box)?;
+        Self::write_counted(&mut self.writer, &mut self.bytes_written, &final_moov)?;
+        Self::write_counted(
+            &mut self.writer,
+            &mut self.bytes_written,
+            &(mdat_total_size as u32).to_be_bytes(),
+        )?;
+        Self::write_counted(&mut self.writer, &mut self.bytes_written, b"mdat")?;
+        for sample in &self.audio_samples {
+            Self::write_counted(&mut self.writer, &mut self.bytes_written, &sample.data)?;
+        }
+        Ok(())
+    }
+
     fn compute_interleave_schedule(&self) -> Vec<(u64, TrackKind, usize)> {
         let mut schedule: Vec<(u64, TrackKind, usize)> = Vec::new();
         for (idx, sample) in self.video_samples.iter().enumerate() {
@@ -1373,6 +1548,33 @@ fn build_moov_box(
     build_box(b"moov", &payload)
 }
 
+/// Build a `moov` box for an audio-only MP4 (no video track).
+fn build_audio_only_moov_box(
+    audio: &Mp4AudioTrack,
+    audio_tables: &SampleTables,
+    metadata: Option<&Metadata>,
+) -> Vec<u8> {
+    let duration_ms =
+        (audio_tables.total_duration() * MOVIE_TIMESCALE as u64 / MEDIA_TIMESCALE as u64) as u32;
+
+    let mvhd_payload = build_mvhd_payload(duration_ms, 3);
+    let mvhd_box = build_box(b"mvhd", &mvhd_payload);
+    let audio_trak = build_audio_trak_box(audio, audio_tables, metadata);
+
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&mvhd_box);
+    payload.extend_from_slice(&audio_trak);
+
+    if let Some(meta) = metadata {
+        let udta_box = build_udta_box(meta);
+        if !udta_box.is_empty() {
+            payload.extend_from_slice(&udta_box);
+        }
+    }
+
+    build_box(b"moov", &payload)
+}
+
 fn build_audio_trak_box(
     audio: &Mp4AudioTrack,
     tables: &SampleTables,
@@ -1453,7 +1655,7 @@ fn build_audio_stsd_box(audio: &Mp4AudioTrack) -> Vec<u8> {
     build_box(b"stsd", &payload)
 }
 
-fn build_mp4a_box(audio: &Mp4AudioTrack) -> Vec<u8> {
+pub(crate) fn build_mp4a_box(audio: &Mp4AudioTrack) -> Vec<u8> {
     let mut payload = Vec::new();
     payload.extend_from_slice(&[0u8; 6]);
     payload.extend_from_slice(&1u16.to_be_bytes());
@@ -1552,7 +1754,7 @@ fn build_audio_specific_config(sample_rate: u32, channels: u16, profile: AacProf
 }
 
 /// Build an Opus sample entry box.
-fn build_opus_box(audio: &Mp4AudioTrack) -> Vec<u8> {
+pub(crate) fn build_opus_box(audio: &Mp4AudioTrack) -> Vec<u8> {
     let mut payload = Vec::new();
     // Reserved (6 bytes)
     payload.extend_from_slice(&[0u8; 6]);
@@ -2298,7 +2500,7 @@ fn build_tkhd_box_with_id(
     volume: u16,
     width: u32,
     height: u32,
-    duration_ms: u32,
+    _duration_ms: u32,
 ) -> Vec<u8> {
     let mut payload = Vec::new();
     // version=0 (1 byte) + flags=0x000003 track_enabled|track_in_movie (3 bytes)
