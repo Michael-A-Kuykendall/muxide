@@ -1,3 +1,5 @@
+#![cfg(not(target_arch = "wasm32"))]
+
 //! Property-Based Tests for Muxide
 //!
 //! These tests verify invariants hold across a wide range of inputs using proptest.

@@ -1,6 +1,6 @@
 [package]
 name = "muxide"
-version = "0.2.6"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.81"
 description = "Minimal-dependency pure-Rust MP4 muxer for recording applications. Includes CLI tool and library API."
@@ -27,20 +27,32 @@ exclude = [
 [[bin]]
 name = "muxide"
 path = "src/bin/muxide.rs"
+required-features = ["cli"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-clap = { version = "4.4", features = ["derive", "color", "suggestions"] }
-indicatif = "0.17"
+clap = { version = "4.4", features = ["derive", "color", "suggestions"], optional = true }
+indicatif = { version = "0.17", optional = true }
 anyhow = "1.0"
 thiserror = "1.0"
+wasm-bindgen = { version = "0.2", optional = true }
 
-[dev-dependencies]
+[features]
+default = ["cli"]
+cli = ["dep:clap", "dep:indicatif"]
+wasm = ["wasm-bindgen"]
+
+# proptest/criterion/lazy_static/tempfile do not build for wasm32, so only pull
+# them for non-wasm targets. This keeps `cargo test --target wasm32-...` working.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 lazy_static = "1.4"
 proptest = "=1.5.0"
 tempfile = "3.0"
 criterion = "0.5"
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"
 
 [[bench]]
 name = "muxing"

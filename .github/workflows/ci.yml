@@ -46,6 +46,28 @@ jobs:
         run: cargo test --test property_tests
         if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
 
+  wasm-check:
+    name: WASM Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ubuntu-latest-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
+      - name: Check wasm32 target builds
+        run: cargo check --target wasm32-unknown-unknown --no-default-features --features wasm
+
   nightly:
     name: Nightly Comprehensive Testing
     runs-on: ubuntu-latest

@@ -13,6 +13,10 @@
   <code>cargo add muxide</code>
 </p>
 
+<p align="center">
+  <strong>Languages:</strong> <a href="docs/zh-CN/README.md">简体中文</a> · <a href="docs/zh-TW/README.md">繁體中文</a>
+</p>
+
 ---
 
 > **Muxide** takes correctly-timestamped, already-encoded audio/video frames and produces a standards-compliant MP4 — **pure Rust, minimal external dependencies, no FFmpeg.**
@@ -135,7 +139,7 @@ If input violates the contract, Muxide **fails fast** with explicit errors—no 
 
 | Principle | Implementation |
 |-----------|----------------|
-| 🦀 **Pure Rust** | No unsafe, no FFI, no C bindings |
+| 🦀 **Pure Rust core** | Optional WASM + C FFI bindings (Go via cgo) |
 | 📦 **Minimal deps** | Only essential Rust crates — no external binaries |
 | 🧵 **Thread-safe** | `Send + Sync` when writer is |
 | ✅ **Well-tested** | Unit, integration, property tests |
@@ -336,6 +340,98 @@ muxide info input.mp4
 - Comprehensive error messages
 - Fast-start MP4 layout by default
 - Metadata support (title, language, creation time)
+
+---
+
+## Language Bindings (WASM, Go, C)
+
+Muxide's core is pure Rust, but it also ships **optional** language bindings so you can mux MP4 from non-Rust code. All bindings sit on top of the same muxer and emit identical, standards-compliant MP4.
+
+### WASM (browser / JS)
+
+The `wasm` feature compiles the muxer to WebAssembly via [`wasm-bindgen`](https://crates.io/crates/wasm-bindgen).
+
+```bash
+# Build the wasm package
+cargo build --target wasm32-unknown-unknown --features wasm
+# or, with wasm-pack:
+wasm-pack build --target web --features wasm
+```
+
+```js
+import { WasmMuxerBuilder, VideoCodec } from "./pkg/muxide.js";
+
+const builder = new WasmMuxerBuilder();
+builder.video(VideoCodec.H264, 1280, 720, 30.0);
+const muxer = builder.build();
+
+// First H.264 keyframe must contain SPS (NAL 7) + PPS (NAL 8).
+muxer.writeVideo(0.0, h264Keyframe, true);
+
+const bytes = muxer.finish(); // Uint8Array of the complete MP4
+```
+
+`WasmMuxerBuilder` also supports `.audio(...)` and `WasmMuxer` supports `writeVideoWithDts`, `writeAudio`, `encodeVideo`, and `encodeAudio`.
+
+### Go (via C FFI + cgo)
+
+The C FFI layer lives in `src/ffi.rs` with a matching header at `bindings/muxide.h`. The Go package under `bindings/go` wraps it with an idiomatic API.
+
+```bash
+# 1) Build the C dynamic library (cdylib)
+cargo rustc --release --lib --crate-type cdylib
+# 2) The Go package links against target/release/libmuxide
+go build ./bindings/go/...
+```
+
+```go
+package main
+
+import (
+    "fmt"
+    muxide "github.com/Michael-A-Kuykendall/muxide/bindings/go"
+)
+
+func main() {
+    m, err := muxide.NewMuxer(muxide.CodecH264, 1280, 720, 30.0)
+    if err != nil {
+        panic(err)
+    }
+    defer m.Close() // runtime finalizer also frees the handle
+
+    keyframe := []byte{0x00, 0x00, 0x00, 0x01, 0x67, 0x64, 0x00, 0x1f, /* SPS */
+        0x00, 0x00, 0x00, 0x01, 0x68, 0xce, 0x3c, 0x80, /* PPS */
+        0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x00 /* IDR */}
+    if err := m.WriteVideo(0.0, keyframe, true); err != nil {
+        panic(err)
+    }
+    out, err := m.Finish()
+    if err != nil {
+        panic(err)
+    }
+    fmt.Printf("wrote %d bytes of MP4\n", len(out))
+}
+```
+
+The Go API: `NewMuxer` / `NewMuxerWithAudio`, `WriteVideo`, `WriteVideoWithDTS`, `WriteAudio`, `Finish() ([]byte, error)`, and `Close()`. Rust errors are surfaced as Go `error` values via `muxide_last_error`.
+
+### C / C++
+
+Include `bindings/muxide.h` and link the cdylib. Opaque handles `MuxideMuxer` / `MuxideFragmentedMuxer`; all functions return `int32_t` error codes (`MUXIDE_OK = 0`, negatives for errors).
+
+```c
+#include "muxide.h"
+
+MuxideMuxer* m = muxide_new(0 /*H264*/, 1280, 720, 30.0);
+muxide_write_video(m, 0.0, keyframe, keyframe_len, 1 /*is_keyframe*/);
+muxide_finish(m);
+size_t len = muxide_output_length(m);
+uint8_t* buf = malloc(len);
+muxide_output_copy(m, buf, len);
+muxide_free(m);
+```
+
+See [`bindings/muxide.h`](bindings/muxide.h) for the full list of 18 `extern "C"` functions, error constants, and the `MuxideMetadata` struct.
 
 ---
 

@@ -440,6 +440,10 @@ impl<Writer: Write> Mp4Writer<Writer> {
         self.bytes_written
     }
 
+    pub(crate) fn into_writer(self) -> Writer {
+        self.writer
+    }
+
     pub(crate) fn max_end_pts(&self) -> Option<u64> {
         fn track_end(samples: &[SampleInfo], last_delta: Option<u32>) -> Option<u64> {
             let last = samples.last()?;
