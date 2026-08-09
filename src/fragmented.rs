@@ -6,29 +6,101 @@
 //! - HLS with fMP4
 //! - Low-latency live streaming
 //!
-//! # Example
+//! # Track Configurations
+//!
+//! The `FragmentedMuxer` supports three track configurations:
+//!
+//! 1. **Video-only** — Created with [`FragmentedMuxer::new`]. Contains a single
+//!    video track (track ID 1). Use [`write_video`] to queue samples.
+//!    [`write_audio`] will return [`FragmentedError::AudioTrackNotConfigured`].
+//!
+//! 2. **Audio-only** — Created with [`FragmentedMuxer::new_audio_only`]. Contains a
+//!    single audio track (track ID 1). Use [`write_audio`] to queue samples.
+//!    [`write_video`] will return [`FragmentedError::AudioTrackNotConfigured`].
+//!
+//! 3. **Video + Audio (two-track)** — Created with [`FragmentedMuxer::new_with_audio`].
+//!    Contains a video track (track ID 1) and an audio track (track ID 2).
+//!    Use [`write_video`] for video samples and [`write_audio`] for audio samples.
+//!    Both methods enforce monotonic DTS per track. The init segment contains
+//!    two `trak` boxes and two `trex` entries. Media segments (`moof` + `mdat`)
+//!    contain two `traf` boxes (one per track), each with its own `tfdt` and `trun`.
+//!
+//! # Fragment Duration
+//!
+//! The [`FragmentConfig::fragment_duration_ms`] field controls the target
+//! duration of each fragment. Use [`ready_to_flush`] to determine when enough
+//! samples have been queued to produce a fragment of the desired duration.
+//! Call [`flush_segment`] to produce a media segment (`moof` + `mdat`).
+//!
+//! # Example: Two-Track Fragmented MP4
+//!
 //! ```
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! use muxide::api::{MuxerBuilder, VideoCodec};
+//! use muxide::api::{VideoCodec, AudioCodec, AacProfile};
+//! use muxide::fragmented::{FragmentConfig, FragmentedMuxer, FragmentAudioConfig};
 //!
-//! // Create a fragmented muxer using the builder API
-//! let mut muxer = MuxerBuilder::new(Vec::<u8>::new())
-//!     .video(VideoCodec::H264, 1920, 1080, 30.0)
-//!     .with_sps(vec![0x67, 0x42, 0x00, 0x1e, 0xda, 0x02, 0x80, 0x2d, 0x8b, 0x11]) // SPS
-//!     .with_pps(vec![0x68, 0xce, 0x38, 0x80]) // PPS
-//!     .new_with_fragment()?;
+//! // Configure video + audio
+//! let config = FragmentConfig::new(1920, 1080, 90000);
+//! let audio = FragmentAudioConfig {
+//!     codec: AudioCodec::Aac(AacProfile::Lc),
+//!     sample_rate: 48000,
+//!     channels: 2,
+//! };
+//! let mut muxer = FragmentedMuxer::new_with_audio(config, audio)?;
 //!
-//! // Get init segment (write once at start)
-//! let init_segment = muxer.init_segment();
+//! // Get init segment (ftyp + moov with two tracks)
+//! let init = muxer.init_segment();
 //!
-//! // Write frames...
-//! let data = vec![0u8; 100]; // Your frame data
-//! muxer.write_video(0, 0, &data, true)?;
+//! // Write video and audio frames
+//! let video_frame_data = vec![0u8; 100];
+//! let audio_frame_data = vec![0u8; 50];
+//! muxer.write_video(0, 0, &video_frame_data, true)?;
+//! muxer.write_audio(0, 0, &audio_frame_data)?;
 //!
-//! // Get media segment when ready
+//! // Flush when ready
 //! if let Some(segment) = muxer.flush_segment() {
 //!     // Send segment to client
 //! }
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # Example: Audio-Only Fragmented MP4
+//!
+//! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use muxide::api::{AudioCodec, AacProfile};
+//! use muxide::fragmented::{FragmentedMuxer, FragmentAudioConfig};
+//!
+//! let audio = FragmentAudioConfig {
+//!     codec: AudioCodec::Aac(AacProfile::Lc),
+//!     sample_rate: 48000,
+//!     channels: 2,
+//! };
+//! let mut muxer = FragmentedMuxer::new_audio_only(audio)?;
+//!
+//! let init = muxer.init_segment();
+//! let audio_frame = vec![0u8; 50];
+//! muxer.write_audio(0, 0, &audio_frame)?;
+//! if let Some(segment) = muxer.flush_segment() { /* ... */ }
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # Example: Video-Only Fragmented MP4
+//!
+//! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use muxide::api::VideoCodec;
+//! use muxide::fragmented::{FragmentConfig, FragmentedMuxer};
+//!
+//! let config = FragmentConfig::new(1920, 1080, 90000);
+//! let mut muxer = FragmentedMuxer::new(config);
+//!
+//! let init = muxer.init_segment();
+//! let frame_data = vec![0u8; 100];
+//! muxer.write_video(0, 0, &frame_data, true)?;
+//! if let Some(segment) = muxer.flush_segment() { /* ... */ }
 //! # Ok(())
 //! # }
 //! ```
