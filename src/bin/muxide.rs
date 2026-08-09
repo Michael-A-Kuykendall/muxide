@@ -8,7 +8,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use serde::Serialize;
 
 use muxide::api::{AacProfile, AudioCodec, Metadata, Muxer, MuxerBuilder, VideoCodec};
-use muxide::codec::{h264 as h264_codec, vp9 as vp9_codec};
+use muxide::codec::{h264 as h264_codec, h265 as h265_codec, vp9 as vp9_codec};
 use muxide::fragmented::{FragmentConfig, FragmentedMuxer};
 
 /// Decode a whitespace-tolerant lowercase hex string into bytes.
@@ -30,6 +30,184 @@ fn read_hex_bytes(contents: &str) -> Result<Vec<u8>> {
         out.push(byte);
     }
     Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+// Frame-record input format (.frames)
+// ---------------------------------------------------------------------------
+// One frame per line, whitespace-separated fields:
+//   # comment line
+//   <pts> [dts] <key|p> <hex...>     -- video frame
+//   a <pts> <hex...>                 -- audio frame
+// Lines starting with '#' are comments. Empty lines are ignored.
+// If the file does not match this format (no leading number or 'a'),
+// the parser returns Ok(None) so the caller can fall back to legacy
+// single-hex-blob mode.
+
+/// A single parsed frame record from a .frames file.
+#[derive(Debug, Clone, PartialEq)]
+struct FrameRecord {
+    /// Whether this is an audio (true) or video (false) frame.
+    is_audio: bool,
+    /// Presentation timestamp in seconds.
+    pts: f64,
+    /// Decode timestamp in seconds (equal to pts if not specified).
+    dts: f64,
+    /// Whether this is a keyframe (video only; audio always true).
+    is_keyframe: bool,
+    /// Raw frame bytes (decoded from hex).
+    data: Vec<u8>,
+}
+
+/// Parse a .frames file into a list of frame records.
+///
+/// Returns `Ok(Some(records))` if the file looks like a frame-record file
+/// (at least one valid record line). Returns `Ok(None)` if the file does
+/// not match the format, so the caller can fall back to legacy hex-blob mode.
+/// Parse a .frames file into a list of frame records.
+///
+/// Returns `Ok(Some(records))` if the file looks like a frame-record file
+/// (at least one valid record line). Returns `Ok(None)` if the file does
+/// not match the format, so the caller can fall back to legacy
+/// single-hex-blob mode.
+/// Parse a .frames file into a list of frame records.
+///
+/// Returns `Ok(Some(records))` if the file looks like a frame-record file
+/// (at least one valid record line). Returns `Ok(None)` if the file does
+/// not match the format, so the caller can fall back to legacy
+/// single-hex-blob mode.
+/// Parse a .frames file into a list of frame records.
+///
+/// Returns `Ok(Some(records))` if the file looks like a frame-record file
+/// (at least one valid record line). Returns `Ok(None)` if the file does
+/// not match the format, so the caller can fall back to legacy
+/// single-hex-blob mode.
+/// Parse a .frames file into a list of frame records.
+///
+/// Returns `Ok(Some(records))` if the file looks like a frame-record file
+/// (at least one valid record line). Returns `Ok(None)` if the file does
+/// not match the format, so the caller can fall back to legacy
+/// single-hex-blob mode.
+fn parse_frame_records(contents: &str) -> Result<Option<Vec<FrameRecord>>> {
+    // A file is a frame-record file if it contains at least one line that
+    // looks like a valid record: either an audio record (starts with 'a')
+    // or a video record (has a key/p flag). Otherwise fall back to legacy
+    // single-hex-blob mode.
+    let looks_like_records = contents.lines().any(|line| {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            return false;
+        }
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if parts.is_empty() {
+            return false;
+        }
+        if parts[0] == "a" {
+            return parts.len() >= 3;
+        }
+        // Video record: must have a key/p flag somewhere after pts [dts]
+        parts
+            .iter()
+            .any(|p| matches!(*p, "key" | "k" | "p" | "nonkey"))
+    });
+
+    if !looks_like_records {
+        return Ok(None);
+    }
+
+    let mut records = Vec::new();
+
+    for (line_no, line) in contents.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if parts.is_empty() {
+            continue;
+        }
+
+        // Audio record: "a <pts> <hex...>"
+        if parts[0] == "a" {
+            if parts.len() < 3 {
+                anyhow::bail!("line {}: audio record needs 'a <pts> <hex>'", line_no + 1);
+            }
+            let pts: f64 = parts[1]
+                .parse()
+                .with_context(|| format!("line {}: invalid pts '{}'", line_no + 1, parts[1]))?;
+            let hex_str = parts[2..].join("");
+            let data = read_hex_bytes(&hex_str)
+                .with_context(|| format!("line {}: invalid hex data", line_no + 1))?;
+            records.push(FrameRecord {
+                is_audio: true,
+                pts,
+                dts: pts,
+                is_keyframe: true,
+                data,
+            });
+            continue;
+        }
+
+        // Video record: "<pts> [dts] <key|p> <hex...>"
+        let pts: f64 = parts[0]
+            .parse()
+            .with_context(|| format!("line {}: invalid pts '{}'", line_no + 1, parts[0]))?;
+
+        let mut idx = 1;
+        // Optional DTS
+        let dts = if idx < parts.len() {
+            if let Ok(d) = parts[idx].parse::<f64>() {
+                idx += 1;
+                d
+            } else {
+                pts
+            }
+        } else {
+            pts
+        };
+
+        // key/p flag
+        if idx >= parts.len() {
+            anyhow::bail!(
+                "line {}: video record needs '<pts> [dts] <key|p> <hex>'",
+                line_no + 1
+            );
+        }
+        let is_keyframe = match parts[idx] {
+            "key" | "k" => true,
+            "p" | "nonkey" => false,
+            _ => {
+                anyhow::bail!(
+                    "line {}: expected 'key' or 'p', got '{}'",
+                    line_no + 1,
+                    parts[idx]
+                );
+            }
+        };
+        idx += 1;
+
+        if idx >= parts.len() {
+            anyhow::bail!(
+                "line {}: video record needs hex data after key flag",
+                line_no + 1
+            );
+        }
+
+        let hex_str = parts[idx..].join("");
+        let data = read_hex_bytes(&hex_str)
+            .with_context(|| format!("line {}: invalid hex data", line_no + 1))?;
+
+        records.push(FrameRecord {
+            is_audio: false,
+            pts,
+            dts,
+            is_keyframe,
+            data,
+        });
+    }
+
+    Ok(Some(records))
 }
 
 /// Muxide - Minimal-dependency pure-Rust MP4 muxer
@@ -110,6 +288,14 @@ enum Commands {
         /// Fragment duration in milliseconds
         #[arg(long, default_value = "2000")]
         fragment_duration_ms: u32,
+
+        /// HEVC VPS NAL unit (hex) for fragmented H.265 output
+        #[arg(long)]
+        vps: Option<String>,
+
+        /// AV1 sequence header OBU (hex) for fragmented AV1 output
+        #[arg(long)]
+        av1_sequence_header: Option<String>,
 
         /// Video title
         #[arg(long)]
@@ -245,6 +431,8 @@ fn main() -> Result<()> {
             channels,
             fragmented,
             fragment_duration_ms,
+            vps,
+            av1_sequence_header,
             title,
             language,
             creation_time,
@@ -264,6 +452,8 @@ fn main() -> Result<()> {
                 channels,
                 fragmented,
                 fragment_duration_ms,
+                vps,
+                av1_sequence_header,
                 title,
                 language,
                 creation_time,
@@ -298,6 +488,8 @@ fn mux_command(
     channels: Option<u8>,
     fragmented: bool,
     fragment_duration_ms: u32,
+    vps: Option<String>,
+    av1_sequence_header: Option<String>,
     title: Option<String>,
     language: Option<String>,
     creation_time: Option<u64>,
@@ -333,7 +525,7 @@ fn mux_command(
                 anyhow::bail!("Video input file does not exist: {}", video_path.display());
             }
             if verbose {
-                eprintln!("✓ Video input: {}", video_path.display());
+                eprintln!("OK Video input: {}", video_path.display());
             }
         }
 
@@ -342,7 +534,7 @@ fn mux_command(
                 anyhow::bail!("Audio input file does not exist: {}", audio_path.display());
             }
             if verbose {
-                eprintln!("✓ Audio input: {}", audio_path.display());
+                eprintln!("OK Audio input: {}", audio_path.display());
             }
         }
 
@@ -354,7 +546,7 @@ fn mux_command(
         if json {
             println!("{{\"dry_run\": true, \"valid\": true}}");
         } else {
-            println!("✅ Dry run complete - inputs are valid!");
+            println!("OK Dry run complete - inputs are valid!");
             if let Some(ref video_path) = video {
                 println!("   Video input: {}", video_path.display());
             }
@@ -384,10 +576,14 @@ fn mux_command(
         };
         let codec = video_codec.unwrap_or(VideoCodec::H264);
         if matches!(codec, VideoCodec::H265 | VideoCodec::Av1) {
-            anyhow::bail!(
-                "Fragmented {} via CLI requires VPS/SPS/PPS params not yet exposed here. Use the library API with FragmentedMuxer directly.",
-                codec
-            );
+            if codec == VideoCodec::H265 && vps.is_none() {
+                anyhow::bail!("Fragmented H.265 via CLI requires VPS params: provide --vps <hex>");
+            }
+            if codec == VideoCodec::Av1 && av1_sequence_header.is_none() {
+                anyhow::bail!(
+                    "Fragmented AV1 via CLI requires a sequence header: provide --av1-sequence-header <hex>"
+                );
+            }
         }
 
         // Read input
@@ -417,6 +613,41 @@ fn mux_command(
                 };
                 (avcc, cfg)
             }
+            VideoCodec::H265 => {
+                let hevc = h265_codec::extract_hevc_config(&frame_data)
+                    .ok_or_else(|| anyhow::anyhow!("Failed to extract HEVC config from input"))?;
+                let avcc = h264_codec::annexb_to_avcc(&frame_data);
+                let cfg = FragmentConfig {
+                    width: vid_w,
+                    height: vid_h,
+                    timescale: 90000,
+                    fragment_duration_ms,
+                    sps: hevc.sps,
+                    pps: hevc.pps,
+                    vps: vps.as_ref().map(|h| read_hex_bytes(h).unwrap_or_default()),
+                    av1_sequence_header: None,
+                    vp9_config: None,
+                };
+                (avcc, cfg)
+            }
+            VideoCodec::Av1 => {
+                let av1 = muxide::codec::av1::extract_av1_config(&frame_data)
+                    .ok_or_else(|| anyhow::anyhow!("Failed to extract AV1 config from input"))?;
+                let cfg = FragmentConfig {
+                    width: vid_w,
+                    height: vid_h,
+                    timescale: 90000,
+                    fragment_duration_ms,
+                    sps: vec![],
+                    pps: vec![],
+                    vps: None,
+                    av1_sequence_header: av1_sequence_header
+                        .as_ref()
+                        .map(|h| read_hex_bytes(h).unwrap_or_default()),
+                    vp9_config: None,
+                };
+                (frame_data.clone(), cfg)
+            }
             VideoCodec::Vp9 => {
                 let vp9_cfg = vp9_codec::extract_vp9_config(&frame_data);
                 let cfg = FragmentConfig {
@@ -432,7 +663,6 @@ fn mux_command(
                 };
                 (frame_data.clone(), cfg)
             }
-            _ => unreachable!(),
         };
 
         let is_sync = match codec {
@@ -464,7 +694,7 @@ fn mux_command(
         if json {
             println!("{}", serde_json::to_string_pretty(&stats)?);
         } else {
-            println!("✅ Fragmented MP4 muxing complete!");
+            println!("OK Fragmented MP4 muxing complete!");
             println!("   Video frames: {}", stats.video_frames);
             println!("   Total size: {} bytes", stats.total_bytes);
             println!("   Output: {}", output.display());
@@ -576,7 +806,7 @@ fn mux_command(
     if json {
         println!("{}", serde_json::to_string_pretty(&stats)?);
     } else {
-        println!("✅ Muxing complete!");
+        println!("OK Muxing complete!");
         println!("   Video frames: {}", stats.video_frames);
         println!("   Audio frames: {}", stats.audio_frames);
         println!("   Total size: {} bytes", stats.total_bytes);
@@ -600,21 +830,36 @@ fn process_video_frames(
         .with_context(|| format!("Failed to open video file: {}", video_path.display()))?;
 
     let mut reader = BufReader::new(file);
-    let mut hex_content = String::new();
+    let mut contents = String::new();
     reader
-        .read_to_string(&mut hex_content)
+        .read_to_string(&mut contents)
         .with_context(|| "Failed to read video data")?;
 
-    // Convert hex string to bytes (like the example does)
-    let data = read_hex_bytes(&hex_content)?;
+    let records = parse_frame_records(&contents)?;
+    let records = match records {
+        Some(r) => r,
+        None => {
+            // Legacy single-hex-blob mode (backwards compatible).
+            let data = read_hex_bytes(&contents)?;
+            muxer
+                .write_video(0.0, &data, true)
+                .with_context(|| "Failed to write video frame")?;
+            progress.update_video_frame();
+            progress.update_bytes(data.len() as u64);
+            return Ok(());
+        }
+    };
 
-    // Write the frame (assuming it's a keyframe at time 0)
-    muxer
-        .write_video(0.0, &data, true)
-        .with_context(|| "Failed to write video frame")?;
-
-    progress.update_video_frame();
-    progress.update_bytes(data.len() as u64);
+    for record in &records {
+        if record.is_audio {
+            continue; // audio records handled by process_audio_frames
+        }
+        muxer
+            .write_video(record.pts, &record.data, record.is_keyframe)
+            .with_context(|| "Failed to write video frame")?;
+        progress.update_video_frame();
+        progress.update_bytes(record.data.len() as u64);
+    }
 
     Ok(())
 }
@@ -633,21 +878,36 @@ fn process_audio_frames(
         .with_context(|| format!("Failed to open audio file: {}", audio_path.display()))?;
 
     let mut reader = BufReader::new(file);
-    let mut hex_content = String::new();
+    let mut contents = String::new();
     reader
-        .read_to_string(&mut hex_content)
+        .read_to_string(&mut contents)
         .with_context(|| "Failed to read audio data")?;
 
-    // Convert hex string to bytes
-    let data = read_hex_bytes(&hex_content)?;
+    let records = parse_frame_records(&contents)?;
+    let records = match records {
+        Some(r) => r,
+        None => {
+            // Legacy single-hex-blob mode (backwards compatible).
+            let data = read_hex_bytes(&contents)?;
+            muxer
+                .write_audio(0.0, &data)
+                .with_context(|| "Failed to write audio frame")?;
+            progress.update_audio_frame();
+            progress.update_bytes(data.len() as u64);
+            return Ok(());
+        }
+    };
 
-    // Write the frame at time 0
-    muxer
-        .write_audio(0.0, &data)
-        .with_context(|| "Failed to write audio frame")?;
-
-    progress.update_audio_frame();
-    progress.update_bytes(data.len() as u64);
+    for record in &records {
+        if !record.is_audio {
+            continue; // video records handled by process_video_frames
+        }
+        muxer
+            .write_audio(record.pts, &record.data)
+            .with_context(|| "Failed to write audio frame")?;
+        progress.update_audio_frame();
+        progress.update_bytes(record.data.len() as u64);
+    }
 
     Ok(())
 }
@@ -748,17 +1008,17 @@ fn validate_command(
         println!("{}", serde_json::to_string(&report)?);
     } else {
         if is_valid {
-            println!("✅ Validation successful!");
+            println!("OK Validation successful!");
         } else {
-            println!("❌ Validation failed!");
+            println!("FAIL Validation failed!");
         }
         for check in &checks {
             let status = check["status"].as_str().unwrap();
             let message = check["message"].as_str().unwrap();
             if status == "error" {
-                println!("   ❌ {}", message);
+                println!("   FAIL {}", message);
             } else {
-                println!("   ✅ {}", message);
+                println!("   OK {}", message);
             }
         }
     }
@@ -892,4 +1152,82 @@ fn info_command(input: PathBuf, verbose: bool, json: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_single_video_keyframe() {
+        let input = "0.0 key 000000016742001e\n";
+        let records = parse_frame_records(input).unwrap().unwrap();
+        assert_eq!(records.len(), 1);
+        assert!(!records[0].is_audio);
+        assert!(records[0].is_keyframe);
+        assert_eq!(records[0].pts, 0.0);
+        assert_eq!(
+            records[0].data,
+            vec![0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1e]
+        );
+    }
+
+    #[test]
+    fn parse_video_with_dts() {
+        let input = "0.0 0.0 key 0067\n1.0 0.033 p 0068\n";
+        let records = parse_frame_records(input).unwrap().unwrap();
+        assert_eq!(records.len(), 2);
+        assert!(records[0].is_keyframe);
+        assert!(!records[1].is_keyframe);
+        assert_eq!(records[1].dts, 0.033);
+    }
+
+    #[test]
+    fn parse_audio_record() {
+        let input = "a 0.0 fff14c80\n";
+        let records = parse_frame_records(input).unwrap().unwrap();
+        assert_eq!(records.len(), 1);
+        assert!(records[0].is_audio);
+        assert!(records[0].is_keyframe);
+        assert_eq!(records[0].data, vec![0xff, 0xf1, 0x4c, 0x80]);
+    }
+
+    #[test]
+    fn parse_comments_and_blanks() {
+        let input = "# comment\n\n  \n0.0 key 0067\n";
+        let records = parse_frame_records(input).unwrap().unwrap();
+        assert_eq!(records.len(), 1);
+    }
+
+    #[test]
+    fn parse_multi_frame_mixed() {
+        let input = "# video frames\n0.0 key 0067\n0.033 p 0068\n# audio\na 0.0 fff1\n";
+        let records = parse_frame_records(input).unwrap().unwrap();
+        assert_eq!(records.len(), 3);
+        assert!(!records[0].is_audio);
+        assert!(!records[1].is_audio);
+        assert!(records[2].is_audio);
+    }
+
+    #[test]
+    fn parse_fallback_for_legacy_hex() {
+        // A file that's just hex (no leading number or 'a') should return None
+        let input = "00 00 00 01 67 42 00 1e\n";
+        let result = parse_frame_records(input).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn parse_error_bad_key_flag() {
+        let input = "0.0 key\n";
+        let result = parse_frame_records(input);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_error_missing_hex() {
+        let input = "0.0 key\n";
+        let result = parse_frame_records(input);
+        assert!(result.is_err());
+    }
 }

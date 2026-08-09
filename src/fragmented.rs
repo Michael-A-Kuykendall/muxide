@@ -42,6 +42,8 @@ use crate::muxer::mp4::{build_mp4a_box, build_opus_box, encode_language_code, Mp
 pub enum FragmentedError {
     /// DTS values must be non-decreasing.
     NonMonotonicDts { prev_dts: u64, curr_dts: u64 },
+    /// Audio samples can only be written to an audio-only muxer.
+    AudioTrackNotConfigured,
 }
 
 impl std::error::Error for FragmentedError {}
@@ -54,6 +56,13 @@ impl std::fmt::Display for FragmentedError {
                     f,
                     "DTS values must be non-decreasing: prev={}, curr={}",
                     prev_dts, curr_dts
+                )
+            }
+            FragmentedError::AudioTrackNotConfigured => {
+                write!(
+                    f,
+                    "audio samples can only be written to an audio-only muxer; \
+                     use FragmentedMuxer::new_audio_only() for audio output"
                 )
             }
         }
@@ -83,21 +92,30 @@ pub struct FragmentConfig {
     pub vp9_config: Option<crate::codec::vp9::Vp9Config>,
 }
 
-impl Default for FragmentConfig {
-    fn default() -> Self {
-        // Note: This default provides example SPS/PPS for testing.
-        // In production, you must provide actual SPS/PPS from your encoder.
+impl FragmentConfig {
+    /// Create a new fragmented MP4 configuration.
+    ///
+    /// The SPS/PPS (and VPS for H.265) must be real codec parameter sets
+    /// extracted from the encoder output. Using example or placeholder bytes
+    /// produces a structurally valid but semantically wrong MP4.
+    pub fn new(width: u32, height: u32, timescale: u32) -> Self {
         Self {
-            width: 1920,
-            height: 1080,
-            timescale: 90000,
+            width,
+            height,
+            timescale,
             fragment_duration_ms: 2000,
-            sps: vec![0x67, 0x42, 0x00, 0x1e, 0xda, 0x02, 0x80, 0x2d, 0x8b, 0x11],
-            pps: vec![0x68, 0xce, 0x38, 0x80],
+            sps: Vec::new(),
+            pps: Vec::new(),
             vps: None,
             av1_sequence_header: None,
             vp9_config: None,
         }
+    }
+
+    /// Set the target fragment duration in milliseconds.
+    pub fn with_fragment_duration_ms(mut self, duration_ms: u32) -> Self {
+        self.fragment_duration_ms = duration_ms;
+        self
     }
 }
 
@@ -168,7 +186,14 @@ impl FragmentedMuxer {
     /// (AAC `mp4a` or `Opus` sample entry) and an `mvex` box referencing it.
     /// The media timescale equals the audio sample rate, so sample timestamps
     /// passed to [`write_audio`](Self::write_audio) are in audio samples.
-    pub fn new_audio_only(audio: FragmentAudioConfig) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the codec is `AudioCodec::None`.
+    pub fn new_audio_only(audio: FragmentAudioConfig) -> Result<Self, FragmentedError> {
+        if audio.codec == AudioCodec::None {
+            return Err(FragmentedError::AudioTrackNotConfigured);
+        }
         let timescale = audio.sample_rate.max(1);
         let config = FragmentConfig {
             width: 0,
@@ -181,7 +206,7 @@ impl FragmentedMuxer {
             av1_sequence_header: None,
             vp9_config: None,
         };
-        Self {
+        Ok(Self {
             config,
             audio: Some(audio),
             has_video: false,
@@ -190,7 +215,7 @@ impl FragmentedMuxer {
             base_media_decode_time: 0,
             init_segment: None,
             last_dts: None,
-        }
+        })
     }
 
     /// Get the initialization segment (ftyp + moov).
@@ -255,6 +280,9 @@ impl FragmentedMuxer {
     ///
     /// Audio samples are always sync samples.
     pub fn write_audio(&mut self, pts: u64, dts: u64, data: &[u8]) -> Result<(), FragmentedError> {
+        if self.audio.is_none() {
+            return Err(FragmentedError::AudioTrackNotConfigured);
+        }
         // Enforce monotonic DTS
         if let Some(last) = self.last_dts {
             if dts < last {
@@ -1151,9 +1179,121 @@ fn build_trun(samples: &[FragmentSample], data_offset: u32) -> Vec<u8> {
     build_box(b"trun", &payload)
 }
 
+// ============================================================================
+// Async fragment muxer (optional `async` feature)
+// ============================================================================
+
+/// An async writer that writes to a `tokio::io::AsyncWrite`.
+#[cfg(feature = "async")]
+pub struct AsyncWriter<W: tokio::io::AsyncWrite + Unpin> {
+    inner: W,
+}
+
+#[cfg(feature = "async")]
+impl<W: tokio::io::AsyncWrite + Unpin> AsyncWriter<W> {
+    pub fn new(inner: W) -> Self {
+        Self { inner }
+    }
+}
+
+#[cfg(feature = "async")]
+impl<W: tokio::io::AsyncWrite + Unpin> tokio::io::AsyncWrite for AsyncWriter<W> {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        std::pin::Pin::new(&mut self.inner).poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
+/// A fragmented MP4 muxer that writes segments to an async writer.
+///
+/// This type is available only when the `async` feature is enabled.
+/// It mirrors [`FragmentedMuxer`] but writes segments asynchronously.
+#[cfg(feature = "async")]
+pub struct AsyncFragmentedMuxer<W: tokio::io::AsyncWrite + Unpin> {
+    muxer: FragmentedMuxer,
+    writer: AsyncWriter<W>,
+}
+
+#[cfg(feature = "async")]
+impl<W: tokio::io::AsyncWrite + Unpin> AsyncFragmentedMuxer<W> {
+    /// Create a new async fragmented muxer with the given configuration.
+    pub fn new(config: FragmentConfig, writer: W) -> Self {
+        Self {
+            muxer: FragmentedMuxer::new(config),
+            writer: AsyncWriter::new(writer),
+        }
+    }
+
+    /// Get the initialization segment (ftyp + moov).
+    pub fn init_segment(&mut self) -> Vec<u8> {
+        self.muxer.init_segment()
+    }
+
+    /// Queue a video sample for the current fragment.
+    pub fn write_video(
+        &mut self,
+        pts: u64,
+        dts: u64,
+        data: &[u8],
+        is_sync: bool,
+    ) -> Result<(), FragmentedError> {
+        self.muxer.write_video(pts, dts, data, is_sync)
+    }
+
+    /// Queue an audio sample for the current fragment (audio-only muxers).
+    pub fn write_audio(
+        &mut self,
+        pts: u64,
+        dts: u64,
+        data: &[u8],
+    ) -> Result<(), FragmentedError> {
+        self.muxer.write_audio(pts, dts, data)
+    }
+
+    /// Flush all queued samples as a media segment (moof + mdat) and write it
+    /// to the async writer. Returns the written byte count.
+    pub async fn flush_segment(&mut self) -> Result<usize, std::io::Error> {
+        use tokio::io::AsyncWriteExt;
+        let segment = self
+            .muxer
+            .flush_segment()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "no samples to flush"))?;
+        self.writer.inner.write_all(&segment).await?;
+        Ok(segment.len())
+    }
+
+    /// Check if we have enough samples to make a fragment.
+    pub fn ready_to_flush(&self) -> bool {
+        self.muxer.ready_to_flush()
+    }
+
+    /// Get current fragment duration in milliseconds.
+    pub fn current_fragment_duration_ms(&self) -> u64 {
+        self.muxer.current_fragment_duration_ms()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::AacProfile;
 
     fn find_box_offset(data: &[u8], typ: &[u8; 4]) -> Option<usize> {
         data.windows(4)
@@ -1171,7 +1311,7 @@ mod tests {
 
     #[test]
     fn init_segment_contains_ftyp_moov() {
-        let config = FragmentConfig::default();
+        let config = FragmentConfig::new(1920, 1080, 90000);
         let mut muxer = FragmentedMuxer::new(config);
         let init = muxer.init_segment();
 
@@ -1185,7 +1325,7 @@ mod tests {
 
     #[test]
     fn init_segment_is_cached_after_first_call() {
-        let config = FragmentConfig::default();
+        let config = FragmentConfig::new(1920, 1080, 90000);
         let mut muxer = FragmentedMuxer::new(config);
         let init1 = muxer.init_segment();
         let init2 = muxer.init_segment();
@@ -1194,7 +1334,7 @@ mod tests {
 
     #[test]
     fn media_segment_contains_moof_mdat() {
-        let config = FragmentConfig::default();
+        let config = FragmentConfig::new(1920, 1080, 90000);
         let mut muxer = FragmentedMuxer::new(config);
 
         // Write some samples
@@ -1214,10 +1354,7 @@ mod tests {
 
     #[test]
     fn ready_to_flush_tracks_sample_count_and_duration() {
-        let config = FragmentConfig {
-            fragment_duration_ms: 1,
-            ..Default::default()
-        };
+        let config = FragmentConfig::new(1920, 1080, 90000).with_fragment_duration_ms(1);
         let mut muxer = FragmentedMuxer::new(config);
 
         assert!(!muxer.ready_to_flush(), "empty should not be ready");
@@ -1236,7 +1373,7 @@ mod tests {
 
     #[test]
     fn tfdt_base_decode_time_advances_between_segments() {
-        let config = FragmentConfig::default();
+        let config = FragmentConfig::new(1920, 1080, 90000);
         let mut muxer = FragmentedMuxer::new(config);
 
         let sample_data = vec![0, 0, 0, 5, 0x65, 1, 2, 3, 4];
@@ -1258,7 +1395,7 @@ mod tests {
 
     #[test]
     fn trun_single_sample_uses_default_duration_3000() {
-        let config = FragmentConfig::default();
+        let config = FragmentConfig::new(1920, 1080, 90000);
         let mut muxer = FragmentedMuxer::new(config);
 
         let sample_data = vec![0, 0, 0, 5, 0x65, 1, 2, 3, 4];
@@ -1273,8 +1410,61 @@ mod tests {
 
     #[test]
     fn flush_returns_none_when_empty() {
-        let config = FragmentConfig::default();
+        let config = FragmentConfig::new(1920, 1080, 90000);
         let mut muxer = FragmentedMuxer::new(config);
         assert!(muxer.flush_segment().is_none());
+    }
+
+#[cfg(feature = "async")]
+    #[tokio::test]
+    async fn async_fragmented_muxer_flushes_segment() {
+        use tokio::io::AsyncWriteExt;
+
+        let config = FragmentConfig::new(1920, 1080, 90000);
+        let mut buf = Vec::new();
+        let mut muxer = AsyncFragmentedMuxer::new(config, &mut buf);
+
+        let sample_data = vec![0u8; 100];
+        muxer.write_video(0, 0, &sample_data, true).unwrap();
+        muxer.write_video(3000, 3000, &sample_data, false).unwrap();
+
+        let written = muxer.flush_segment().await.unwrap();
+        assert!(written > 0);
+        assert!(buf.len() > 0);
+    }
+
+    #[test]
+    fn write_audio_on_video_muxer_returns_error() {
+        let config = FragmentConfig::new(1920, 1080, 90000);
+        let mut muxer = FragmentedMuxer::new(config);
+        let result = muxer.write_audio(0, 0, &[0u8; 10]);
+        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(FragmentedError::AudioTrackNotConfigured)
+        ));
+    }
+
+    #[test]
+    fn write_audio_on_audio_only_muxer_succeeds() {
+        let audio = FragmentAudioConfig {
+            codec: AudioCodec::Aac(AacProfile::Lc),
+            sample_rate: 48000,
+            channels: 2,
+        };
+        let mut muxer = FragmentedMuxer::new_audio_only(audio).unwrap();
+        let result = muxer.write_audio(0, 0, &[0u8; 10]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn new_audio_only_with_none_codec_returns_error() {
+        let audio = FragmentAudioConfig {
+            codec: AudioCodec::None,
+            sample_rate: 48000,
+            channels: 2,
+        };
+        let result = FragmentedMuxer::new_audio_only(audio);
+        assert!(result.is_err());
     }
 }

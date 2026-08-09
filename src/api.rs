@@ -6,7 +6,6 @@
 //! capabilities promised by the charter and contract documents.
 
 use crate::codec::av1::is_av1_keyframe;
-use crate::codec::common::AnnexBNalIter;
 use crate::codec::vp9::is_vp9_keyframe;
 use crate::fragmented::{FragmentAudioConfig, FragmentConfig, FragmentedMuxer};
 use crate::muxer::mp4::{Mp4AudioTrack, Mp4VideoTrack, Mp4Writer, Mp4WriterError, MEDIA_TIMESCALE};
@@ -154,6 +153,17 @@ pub struct Metadata {
     pub creation_time: Option<u64>,
     /// Language code (ISO 639-2/T format, e.g., "eng", "spa", "und")
     pub language: Option<String>,
+    /// Chapter markers for navigation points in long videos.
+    pub chapters: Vec<Chapter>,
+}
+
+/// A chapter marker for navigation points in a video.
+#[derive(Debug, Clone)]
+pub struct Chapter {
+    /// Display title of the chapter.
+    pub title: String,
+    /// Start time of the chapter in seconds.
+    pub time_secs: f64,
 }
 
 impl Metadata {
@@ -186,6 +196,12 @@ impl Metadata {
     /// Set language code (ISO 639-2/T format, e.g., "eng", "spa", "und")
     pub fn with_language(mut self, language: impl Into<String>) -> Self {
         self.language = Some(language.into());
+        self
+    }
+
+    /// Add chapter markers for navigation points in a long video.
+    pub fn with_chapters(mut self, chapters: impl IntoIterator<Item = Chapter>) -> Self {
+        self.chapters.extend(chapters);
         self
     }
 }
@@ -443,7 +459,7 @@ impl<Writer> MuxerBuilder<Writer> {
         });
 
         if video_track.is_none() && audio_track.is_none() {
-            return Err(MuxerError::MissingVideoConfig);
+            return Err(MuxerError::MissingTrackConfig);
         }
 
         let mut writer = match &video_track {
@@ -498,10 +514,16 @@ impl<Writer> MuxerBuilder<Writer> {
                         codec: audio_codec,
                         sample_rate,
                         channels,
-                    }));
+                    })
+                    .map_err(|e| {
+                        MuxerError::Io(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            e.to_string(),
+                        ))
+                    })?);
                 }
             }
-            return Err(MuxerError::MissingVideoConfig);
+            return Err(MuxerError::MissingTrackConfig);
         };
 
         // Extract codec-specific configuration
@@ -652,6 +674,13 @@ pub enum MuxerError {
     /// Neither video nor audio was configured. At least one track is
     /// required; call `.video()` and/or `.audio()` on `MuxerBuilder`
     /// before calling `.build()`.
+    MissingTrackConfig,
+    /// Neither video nor audio was configured. At least one track is
+    /// required; call `.video()` and/or `.audio()` on `MuxerBuilder`
+    /// before calling `.build()`.
+    ///
+    /// Deprecated: use [`MissingTrackConfig`](Self::MissingTrackConfig) instead.
+    #[deprecated(note = "use MissingTrackConfig instead")]
     MissingVideoConfig,
     /// Video was written but no video track was configured.
     VideoNotConfigured,
@@ -726,6 +755,9 @@ impl From<std::io::Error> for MuxerError {
 impl fmt::Display for MuxerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            MuxerError::MissingTrackConfig => {
+                write!(f, "missing track configuration: call .video() and/or .audio() on MuxerBuilder before .build()")
+            }
             MuxerError::MissingVideoConfig => {
                 write!(f, "missing track configuration: call .video() and/or .audio() on MuxerBuilder before .build()")
             }
@@ -1131,35 +1163,13 @@ impl<Writer: Write> Muxer<Writer> {
 
     /// Helper to detect if a video frame is a keyframe.
     fn is_keyframe(&self, data: &[u8]) -> bool {
-        use crate::assert_invariant;
-        // INV-100: Video frame data must not be empty.
-        // Callers must check for empty data before calling this method.
-        assert_invariant!(
-            !data.is_empty(),
-            "INV-100: Video frame data must not be empty",
-            "api::is_keyframe"
-        );
-
         let Some(video_track) = &self.video_track else {
             return false;
         };
 
         match video_track.codec {
-            VideoCodec::H264 => {
-                // Check for IDR NAL (type 5); skip empty NAL slices that can arise
-                // from consecutive Annex B start codes in encoder output.
-                AnnexBNalIter::new(data).any(|nal| !nal.is_empty() && (nal[0] & 0x1f) == 5)
-            }
-            VideoCodec::H265 => {
-                // IRAP NAL types: BLA (16-18), IDR (19-20), CRA (21).
-                // Skip empty NAL slices that can arise from consecutive start codes.
-                AnnexBNalIter::new(data).any(|nal| {
-                    !nal.is_empty() && {
-                        let t = (nal[0] >> 1) & 0x3f;
-                        (16..=21).contains(&t)
-                    }
-                })
-            }
+            VideoCodec::H264 => crate::codec::h264::is_h264_keyframe(data),
+            VideoCodec::H265 => crate::codec::h265::is_hevc_keyframe(data),
             VideoCodec::Av1 => is_av1_keyframe(data),
             VideoCodec::Vp9 => is_vp9_keyframe(data).unwrap_or(false),
         }

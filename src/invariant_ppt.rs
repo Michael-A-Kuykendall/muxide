@@ -39,7 +39,9 @@ thread_local! {
 /// * `context` - Optional context (module/function name)
 ///
 /// # Panics
-/// Panics if the condition is false.
+/// Panics if the condition is false in debug builds. In release builds this
+/// macro compiles to nothing (no logging, no panic) so it has zero runtime
+/// cost on production paths.
 #[macro_export]
 macro_rules! assert_invariant {
     ($condition:expr, $message:expr) => {
@@ -53,7 +55,8 @@ macro_rules! assert_invariant {
 /// Internal implementation - do not call directly
 #[doc(hidden)]
 pub fn __assert_invariant_impl(condition: bool, message: &str, context: Option<&str>) {
-    // Log that this invariant was checked
+    // Log that this invariant was checked (only in debug builds).
+    #[cfg(debug_assertions)]
     INVARIANT_LOG.with(|log| {
         log.borrow_mut().insert(message.to_string());
     });

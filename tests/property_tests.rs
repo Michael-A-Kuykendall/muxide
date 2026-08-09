@@ -372,11 +372,10 @@ mod contract_tests {
 
         muxer.finish().unwrap();
 
-        // Verify keyframe detection invariants were checked
-        contract_test(
-            "api::is_keyframe",
-            &["INV-100: Video frame data must not be empty"],
-        );
+        // Verify keyframe detection ran without panicking (INV-100 was removed
+        // as a dead assertion; empty data is rejected by callers before
+        // is_keyframe is reached).
+        contract_test("api::is_keyframe", &[]);
     }
 
     /// Contract test: API write_video must enforce invariants

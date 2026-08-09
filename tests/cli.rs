@@ -421,3 +421,19 @@ fn cli_verbose_output() {
     assert!(stderr.contains("Processing video frames"));
     assert!(stderr.contains("Finalizing MP4"));
 }
+
+/// CLI output must be ASCII-only (no emoji) so it works on legacy Windows
+/// consoles and in redirected logs.
+#[test]
+fn cli_output_is_ascii() {
+    let output = Command::new("cargo")
+        .args(["run", "--bin", "muxide", "--", "--help"])
+        .output()
+        .expect("Failed to run CLI");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for byte in stdout.bytes() {
+        assert!(byte < 0x80, "non-ASCII byte 0x{:02x} in CLI output", byte);
+    }
+}

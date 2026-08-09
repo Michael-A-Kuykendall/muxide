@@ -22,12 +22,12 @@ jobs:
         rust: [stable, "1.86"]
     steps:
       - uses: actions/checkout@v5
-      
+
       - name: Install Rust ${{ matrix.rust }}
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ matrix.rust }}
-      
+
       - name: Cache cargo
         uses: actions/cache@v5
         with:
@@ -38,10 +38,13 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
-      
+
       - name: Run unit tests (fast feedback)
         run: cargo test --lib
-      
+
+      - name: Run async feature tests
+        run: cargo test --features async
+
       - name: Run property tests (comprehensive)
         run: cargo test --test property_tests
         if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
@@ -75,7 +78,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-      
+
       - name: Cache cargo
         uses: actions/cache@v5
         with:
@@ -86,11 +89,11 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ubuntu-latest-cargo-nightly-${{ hashFiles('**/Cargo.lock') }}
-      
+
       - name: Run extended property tests
         run: cargo test --test property_tests
         env:
-          PROPTEST_CASES: 1000  # More test cases for nightly
+          PROPTEST_CASES: 1000
 
   fmt:
     name: Formatting
@@ -138,13 +141,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-      
+
       - name: Install cargo-tarpaulin
         run: cargo install cargo-tarpaulin
-      
+
       - name: Generate coverage
         run: cargo tarpaulin --out Xml
-      
+
       - name: Upload to Codecov
         uses: codecov/codecov-action@v4
         with:

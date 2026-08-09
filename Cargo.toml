@@ -37,11 +37,13 @@ indicatif = { version = "0.17", optional = true }
 anyhow = "1.0"
 thiserror = "2"
 wasm-bindgen = { version = "0.2", optional = true }
+tokio = { version = "1", features = ["io-util", "rt", "macros"], optional = true }
 
 [features]
 default = ["cli"]
 cli = ["dep:clap", "dep:indicatif"]
 wasm = ["wasm-bindgen"]
+async = ["dep:tokio"]
 
 # proptest/criterion/tempfile do not build for wasm32, so only pull
 # them for non-wasm targets. This keeps `cargo test --target wasm32-...` working.

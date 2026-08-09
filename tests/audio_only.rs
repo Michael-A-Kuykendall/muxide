@@ -81,7 +81,7 @@ fn contains_fourcc(data: &[u8], fourcc: &[u8; 4]) -> bool {
 fn build_with_neither_video_nor_audio_still_fails() {
     let result = MuxerBuilder::new(Vec::<u8>::new()).build();
     assert!(
-        matches!(result, Err(MuxerError::MissingVideoConfig)),
+        matches!(result, Err(MuxerError::MissingTrackConfig)),
         "empty builder must return MissingVideoConfig"
     );
 }
@@ -321,7 +321,7 @@ fn audio_only_fmp4_opus_init_segment_uses_opus_sample_entry() {
 #[test]
 fn fragmented_builder_with_neither_track_fails() {
     let result = MuxerBuilder::new(Vec::<u8>::new()).new_with_fragment();
-    assert!(matches!(result, Err(MuxerError::MissingVideoConfig)));
+    assert!(matches!(result, Err(MuxerError::MissingTrackConfig)));
 }
 
 // ---------------------------------------------------------------------------
