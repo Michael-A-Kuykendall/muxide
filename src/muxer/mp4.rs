@@ -2599,32 +2599,85 @@ fn build_box(typ: &[u8; 4], payload: &[u8]) -> Vec<u8> {
 // ============================================================================
 
 fn build_udta_box(metadata: &Metadata) -> Vec<u8> {
+    let mut has_metadata = false;
+
+    // ilst for title/creation_time
     let mut ilst_payload = Vec::new();
 
     if let Some(title) = &metadata.title {
         ilst_payload.extend_from_slice(&build_ilst_string_item(b"\xa9nam", title));
+        has_metadata = true;
     }
 
     if let Some(creation_time) = metadata.creation_time {
-        // Format as ISO 8601: "YYYY-MM-DDTHH:MM:SSZ"
         let date_str = format_unix_timestamp(creation_time);
         ilst_payload.extend_from_slice(&build_ilst_string_item(b"\xa9day", &date_str));
+        has_metadata = true;
     }
 
-    if ilst_payload.is_empty() {
+    // chpl for chapters
+    let mut chpl_payload = Vec::new();
+    if !metadata.chapters.is_empty() {
+        // chpl is a full box (version + flags)
+        chpl_payload.push(1); // version 1
+        chpl_payload.extend_from_slice(&[0u8, 0u8, 0u8]); // flags
+        chpl_payload.extend_from_slice(&(metadata.chapters.len() as u32).to_be_bytes()); // entry count
+
+        for chapter in &metadata.chapters {
+            // Convert time to movie timescale (ms * 1000 = microseconds? No, MOVIE_TIMESCALE = 1000 ms units)
+            // Actually movie timescale is 1000 (ms), so time in seconds * 1000 = ms
+            let start_time_ms = (chapter.time_secs * 1000.0).round() as i64;
+            chpl_payload.extend_from_slice(&start_time_ms.to_be_bytes()); // start time (8 bytes)
+            chpl_payload.extend_from_slice(&[0u8, 0u8, 0u8, 0u8]); // flags (4 bytes)
+            let title_bytes = chapter.title.as_bytes();
+            chpl_payload.push(title_bytes.len() as u8); // title length (1 byte)
+            chpl_payload.extend_from_slice(title_bytes); // title (UTF-8)
+        }
+    }
+
+    let mut meta_payload: Vec<u8> = Vec::new();
+    if !ilst_payload.is_empty() {
+        let ilst_box = build_box(b"ilst", &ilst_payload);
+        meta_payload.extend_from_slice(&ilst_box);
+        has_metadata = true;
+    }
+
+    // Add chpl box to meta if we have chapters
+    if !metadata.chapters.is_empty() {
+        let mut chpl_payload = Vec::new();
+        chpl_payload.push(1); // version 1
+        chpl_payload.extend_from_slice(&[0u8, 0u8, 0u8]); // flags
+        chpl_payload.extend_from_slice(&(metadata.chapters.len() as u32).to_be_bytes());
+
+        for chapter in &metadata.chapters {
+            let start_time_ms = (chapter.time_secs * 1000.0).round() as i64;
+            chpl_payload.extend_from_slice(&start_time_ms.to_be_bytes());
+            chpl_payload.extend_from_slice(&[0u8, 0u8, 0u8, 0u8]);
+            let title_bytes = chapter.title.as_bytes();
+            chpl_payload.push(title_bytes.len() as u8);
+            chpl_payload.extend_from_slice(title_bytes);
+        }
+
+        let chpl_box = build_box(b"chpl", &chpl_payload);
+        meta_payload.extend_from_slice(&chpl_box);
+        has_metadata = true;
+    }
+
+    if !has_metadata {
         return Vec::new(); // No metadata, skip udta entirely
     }
 
     let ilst_box = build_box(b"ilst", &ilst_payload);
+    meta_payload.extend_from_slice(&ilst_box);
 
     // meta box requires hdlr
     let hdlr_box = build_meta_hdlr_box();
 
     // meta is a full box (version + flags)
-    let mut meta_payload = vec![0u8; 4]; // version=0, flags=0
-    meta_payload.extend_from_slice(&hdlr_box);
-    meta_payload.extend_from_slice(&ilst_box);
-    let meta_box = build_box(b"meta", &meta_payload);
+    let mut meta_payload_final = vec![0u8; 4]; // version=0, flags=0
+    meta_payload_final.extend_from_slice(&hdlr_box);
+    meta_payload_final.extend_from_slice(&meta_payload);
+    let meta_box = build_box(b"meta", &meta_payload_final);
 
     build_box(b"udta", &meta_box)
 }
