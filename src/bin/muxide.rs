@@ -631,7 +631,7 @@ fn mux_command(
                 (avcc, cfg)
             }
             VideoCodec::Av1 => {
-                let av1 = muxide::codec::av1::extract_av1_config(&frame_data)
+                let _av1 = muxide::codec::av1::extract_av1_config(&frame_data)
                     .ok_or_else(|| anyhow::anyhow!("Failed to extract AV1 config from input"))?;
                 let cfg = FragmentConfig {
                     width: vid_w,

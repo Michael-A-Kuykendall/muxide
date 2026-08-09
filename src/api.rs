@@ -510,7 +510,7 @@ impl<Writer> MuxerBuilder<Writer> {
         let Some((codec, width, height, _framerate)) = self.video else {
             if let Some((audio_codec, sample_rate, channels)) = self.audio {
                 if audio_codec != AudioCodec::None {
-                    return Ok(FragmentedMuxer::new_audio_only(FragmentAudioConfig {
+                    return FragmentedMuxer::new_audio_only(FragmentAudioConfig {
                         codec: audio_codec,
                         sample_rate,
                         channels,
@@ -520,7 +520,7 @@ impl<Writer> MuxerBuilder<Writer> {
                             std::io::ErrorKind::InvalidInput,
                             e.to_string(),
                         ))
-                    })?);
+                    });
                 }
             }
             return Err(MuxerError::MissingTrackConfig);
@@ -758,6 +758,7 @@ impl fmt::Display for MuxerError {
             MuxerError::MissingTrackConfig => {
                 write!(f, "missing track configuration: call .video() and/or .audio() on MuxerBuilder before .build()")
             }
+            #[allow(deprecated)]
             MuxerError::MissingVideoConfig => {
                 write!(f, "missing track configuration: call .video() and/or .audio() on MuxerBuilder before .build()")
             }

@@ -1258,12 +1258,7 @@ impl<W: tokio::io::AsyncWrite + Unpin> AsyncFragmentedMuxer<W> {
     }
 
     /// Queue an audio sample for the current fragment (audio-only muxers).
-    pub fn write_audio(
-        &mut self,
-        pts: u64,
-        dts: u64,
-        data: &[u8],
-    ) -> Result<(), FragmentedError> {
+    pub fn write_audio(&mut self, pts: u64, dts: u64, data: &[u8]) -> Result<(), FragmentedError> {
         self.muxer.write_audio(pts, dts, data)
     }
 
@@ -1274,7 +1269,7 @@ impl<W: tokio::io::AsyncWrite + Unpin> AsyncFragmentedMuxer<W> {
         let segment = self
             .muxer
             .flush_segment()
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "no samples to flush"))?;
+            .ok_or_else(|| std::io::Error::other("no samples to flush"))?;
         self.writer.inner.write_all(&segment).await?;
         Ok(segment.len())
     }
@@ -1415,7 +1410,7 @@ mod tests {
         assert!(muxer.flush_segment().is_none());
     }
 
-#[cfg(feature = "async")]
+    #[cfg(feature = "async")]
     #[tokio::test]
     async fn async_fragmented_muxer_flushes_segment() {
         use tokio::io::AsyncWriteExt;
