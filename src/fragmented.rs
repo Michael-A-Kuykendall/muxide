@@ -146,6 +146,42 @@ struct FragmentSample {
     is_sync: bool,
 }
 
+/// A sample buffer for a single track (video or audio).
+#[derive(Debug, Default)]
+struct TrackSamples {
+    samples: Vec<FragmentSample>,
+    last_dts: Option<u64>,
+    base_media_decode_time: u64,
+}
+
+impl TrackSamples {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn push(&mut self, sample: FragmentSample) -> Result<(), FragmentedError> {
+        if let Some(last) = self.last_dts {
+            if sample.dts < last {
+                return Err(FragmentedError::NonMonotonicDts {
+                    prev_dts: last,
+                    curr_dts: sample.dts,
+                });
+            }
+        }
+        self.last_dts = Some(sample.dts);
+        self.samples.push(sample);
+        Ok(())
+    }
+
+    fn is_empty(&self) -> bool {
+        self.samples.is_empty()
+    }
+
+    fn take_samples(&mut self) -> Vec<FragmentSample> {
+        std::mem::take(&mut self.samples)
+    }
+}
+
 /// Fallback single-frame duration in 90 kHz timescale ticks (1 frame @ 30 fps).
 ///
 /// Used when only one sample is available and the real duration cannot be inferred
@@ -158,11 +194,10 @@ pub struct FragmentedMuxer {
     config: FragmentConfig,
     audio: Option<FragmentAudioConfig>,
     has_video: bool,
-    samples: Vec<FragmentSample>,
+    video_track: TrackSamples,
+    audio_track: TrackSamples,
     sequence_number: u32,
-    base_media_decode_time: u64,
     init_segment: Option<Vec<u8>>,
-    last_dts: Option<u64>,
 }
 
 impl FragmentedMuxer {
@@ -172,12 +207,38 @@ impl FragmentedMuxer {
             config,
             audio: None,
             has_video: true,
-            samples: Vec::new(),
+            video_track: TrackSamples::new(),
+            audio_track: TrackSamples::new(),
             sequence_number: 1,
-            base_media_decode_time: 0,
             init_segment: None,
-            last_dts: None,
         }
+    }
+
+    /// Create a new fragmented muxer with both video and audio tracks.
+    ///
+    /// This creates a two-track fMP4 suitable for DASH/HLS streaming with both
+    /// video and audio. The video configuration comes from `config` and the
+    /// audio configuration from `audio`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the audio codec is `AudioCodec::None`.
+    pub fn new_with_audio(
+        config: FragmentConfig,
+        audio: FragmentAudioConfig,
+    ) -> Result<Self, FragmentedError> {
+        if audio.codec == AudioCodec::None {
+            return Err(FragmentedError::AudioTrackNotConfigured);
+        }
+        Ok(Self {
+            config,
+            audio: Some(audio),
+            has_video: true,
+            video_track: TrackSamples::new(),
+            audio_track: TrackSamples::new(),
+            sequence_number: 1,
+            init_segment: None,
+        })
     }
 
     /// Create a new audio-only fragmented muxer.
@@ -210,11 +271,10 @@ impl FragmentedMuxer {
             config,
             audio: Some(audio),
             has_video: false,
-            samples: Vec::new(),
+            video_track: TrackSamples::new(),
+            audio_track: TrackSamples::new(),
             sequence_number: 1,
-            base_media_decode_time: 0,
             init_segment: None,
-            last_dts: None,
         })
     }
 
@@ -252,27 +312,19 @@ impl FragmentedMuxer {
         data: &[u8],
         is_sync: bool,
     ) -> Result<(), FragmentedError> {
-        // Enforce monotonic DTS
-        if let Some(last) = self.last_dts {
-            if dts < last {
-                return Err(FragmentedError::NonMonotonicDts {
-                    prev_dts: last,
-                    curr_dts: dts,
-                });
-            }
+        if !self.has_video {
+            return Err(FragmentedError::AudioTrackNotConfigured);
         }
-        self.last_dts = Some(dts);
-
-        self.samples.push(FragmentSample {
+        let sample = FragmentSample {
             pts,
             dts,
             data: data.to_vec(),
             is_sync,
-        });
-        Ok(())
+        };
+        self.video_track.push(sample)
     }
 
-    /// Queue an audio sample for the current fragment (audio-only muxers).
+    /// Queue an audio sample for the current fragment (audio-only or two-track muxers).
     ///
     /// - `pts`: Presentation timestamp in timescale units
     /// - `dts`: Decode timestamp in timescale units (equal to `pts` for audio)
@@ -283,49 +335,63 @@ impl FragmentedMuxer {
         if self.audio.is_none() {
             return Err(FragmentedError::AudioTrackNotConfigured);
         }
-        // Enforce monotonic DTS
-        if let Some(last) = self.last_dts {
-            if dts < last {
-                return Err(FragmentedError::NonMonotonicDts {
-                    prev_dts: last,
-                    curr_dts: dts,
-                });
-            }
-        }
-        self.last_dts = Some(dts);
-
-        self.samples.push(FragmentSample {
+        let sample = FragmentSample {
             pts,
             dts,
             data: data.to_vec(),
             is_sync: true,
-        });
-        Ok(())
+        };
+        self.audio_track.push(sample)
     }
 
     /// Flush all queued samples as a media segment (moof + mdat).
     /// Returns None if there are no samples to flush.
     pub fn flush_segment(&mut self) -> Option<Vec<u8>> {
-        if self.samples.is_empty() {
+        if self.video_track.is_empty() && self.audio_track.is_empty() {
             return None;
         }
 
-        let samples = std::mem::take(&mut self.samples);
-        let segment =
-            build_media_segment(&samples, self.sequence_number, self.base_media_decode_time);
+        // Calculate new base times before taking samples
+        let new_video_base = if self.video_track.samples.len() >= 2 {
+            let samples = &self.video_track.samples;
+            let duration_total = samples.last().unwrap().dts.saturating_sub(samples[0].dts);
+            let avg_duration = duration_total / (samples.len() as u64 - 1);
+            Some(samples.last().unwrap().dts + avg_duration)
+        } else if self.video_track.samples.len() == 1 {
+            Some(self.video_track.samples[0].dts + FALLBACK_FRAME_DURATION_TICKS)
+        } else {
+            None
+        };
+
+        let new_audio_base = if self.audio_track.samples.len() >= 2 {
+            let samples = &self.audio_track.samples;
+            let duration_total = samples.last().unwrap().dts.saturating_sub(samples[0].dts);
+            let avg_duration = duration_total / (samples.len() as u64 - 1);
+            Some(samples.last().unwrap().dts + avg_duration)
+        } else if self.audio_track.samples.len() == 1 {
+            Some(self.audio_track.samples[0].dts + FALLBACK_FRAME_DURATION_TICKS)
+        } else {
+            None
+        };
+
+        let video_samples = self.video_track.take_samples();
+        let audio_samples = self.audio_track.take_samples();
+
+        let segment = build_media_segment(
+            &video_samples,
+            &audio_samples,
+            self.sequence_number,
+            self.video_track.base_media_decode_time,
+            self.audio_track.base_media_decode_time,
+        );
 
         // Update state for next segment
         self.sequence_number += 1;
-        if let Some(last) = samples.last() {
-            // Estimate next base_media_decode_time
-            if samples.len() >= 2 {
-                let duration_total = last.dts.saturating_sub(samples[0].dts);
-                let avg_duration = duration_total / (samples.len() as u64 - 1);
-                self.base_media_decode_time = last.dts + avg_duration;
-            } else {
-                self.base_media_decode_time = last.dts + FALLBACK_FRAME_DURATION_TICKS;
-                // 1 frame at 30fps
-            }
+        if let Some(base) = new_video_base {
+            self.video_track.base_media_decode_time = base;
+        }
+        if let Some(base) = new_audio_base {
+            self.audio_track.base_media_decode_time = base;
         }
 
         Some(segment)
@@ -333,7 +399,7 @@ impl FragmentedMuxer {
 
     /// Check if we have enough samples to make a fragment.
     pub fn ready_to_flush(&self) -> bool {
-        if self.samples.len() < 2 {
+        if self.video_track.is_empty() && self.audio_track.is_empty() {
             return false;
         }
         self.buffered_duration_ms() >= self.config.fragment_duration_ms as u64
@@ -349,12 +415,28 @@ impl FragmentedMuxer {
     /// Returns 0 when fewer than two samples are buffered (no inter-sample
     /// interval is available yet).
     fn buffered_duration_ms(&self) -> u64 {
-        if self.samples.len() < 2 {
-            return 0;
+        let mut max_duration = 0u64;
+
+        if self.video_track.samples.len() >= 2 {
+            let first_dts = self.video_track.samples[0].dts;
+            let last_dts = self.video_track.samples.last().unwrap().dts;
+            let dur = last_dts.saturating_sub(first_dts) * 1000 / self.config.timescale as u64;
+            max_duration = max_duration.max(dur);
         }
-        let first_dts = self.samples[0].dts;
-        let last_dts = self.samples.last().unwrap().dts;
-        last_dts.saturating_sub(first_dts) * 1000 / self.config.timescale as u64
+
+        if self.audio_track.samples.len() >= 2 {
+            let first_dts = self.audio_track.samples[0].dts;
+            let last_dts = self.audio_track.samples.last().unwrap().dts;
+            let audio_timescale = if let Some(audio) = &self.audio {
+                audio.sample_rate
+            } else {
+                self.config.timescale
+            };
+            let dur = last_dts.saturating_sub(first_dts) * 1000 / audio_timescale as u64;
+            max_duration = max_duration.max(dur);
+        }
+
+        max_duration
     }
 }
 
@@ -1026,16 +1108,30 @@ fn build_vpcc_fmp4(config: &FragmentConfig) -> Vec<u8> {
 // Media segment building (moof + mdat)
 // ============================================================================
 
+// ============================================================================
+// Media segment building (moof + mdat)
+// ============================================================================
+
 fn build_media_segment(
-    samples: &[FragmentSample],
+    video_samples: &[FragmentSample],
+    audio_samples: &[FragmentSample],
     sequence_number: u32,
-    base_media_decode_time: u64,
+    video_base_time: u64,
+    audio_base_time: u64,
 ) -> Vec<u8> {
     // Calculate total mdat size
-    let mdat_payload_size: usize = samples.iter().map(|s| s.data.len()).sum();
+    let mdat_payload_size: usize = video_samples.iter().map(|s| s.data.len()).sum::<usize>()
+        + audio_samples.iter().map(|s| s.data.len()).sum::<usize>();
 
-    // Build moof first to get its size
-    let moof = build_moof_with_offset(samples, sequence_number, base_media_decode_time, 0);
+    // Build moof first to get its size (with two tracks)
+    let moof = build_moof_with_offset(
+        video_samples,
+        audio_samples,
+        sequence_number,
+        video_base_time,
+        audio_base_time,
+        0,
+    );
     let moof_size = moof.len() as u32;
 
     // Data offset is moof_size + mdat_header(8)
@@ -1043,9 +1139,11 @@ fn build_media_segment(
 
     // Rebuild moof with correct data offset
     let moof = build_moof_with_offset(
-        samples,
+        video_samples,
+        audio_samples,
         sequence_number,
-        base_media_decode_time,
+        video_base_time,
+        audio_base_time,
         data_offset,
     );
 
@@ -1058,8 +1156,11 @@ fn build_media_segment(
     segment.extend_from_slice(&mdat_size.to_be_bytes());
     segment.extend_from_slice(b"mdat");
 
-    // mdat payload (all sample data)
-    for sample in samples {
+    // mdat payload (all sample data, video first then audio)
+    for sample in video_samples {
+        segment.extend_from_slice(&sample.data);
+    }
+    for sample in audio_samples {
         segment.extend_from_slice(&sample.data);
     }
 
@@ -1067,9 +1168,11 @@ fn build_media_segment(
 }
 
 fn build_moof_with_offset(
-    samples: &[FragmentSample],
+    video_samples: &[FragmentSample],
+    audio_samples: &[FragmentSample],
     sequence_number: u32,
-    base_media_decode_time: u64,
+    video_base_time: u64,
+    audio_base_time: u64,
     data_offset: u32,
 ) -> Vec<u8> {
     let mut payload = Vec::new();
@@ -1078,9 +1181,17 @@ fn build_moof_with_offset(
     let mfhd = build_mfhd(sequence_number);
     payload.extend_from_slice(&mfhd);
 
-    // traf (track fragment)
-    let traf = build_traf(samples, base_media_decode_time, data_offset);
-    payload.extend_from_slice(&traf);
+    // traf for video track (track_id=1)
+    if !video_samples.is_empty() {
+        let traf = build_traf(video_samples, video_base_time, data_offset, 1);
+        payload.extend_from_slice(&traf);
+    }
+
+    // traf for audio track (track_id=2)
+    if !audio_samples.is_empty() {
+        let traf = build_traf(audio_samples, audio_base_time, data_offset, 2);
+        payload.extend_from_slice(&traf);
+    }
 
     build_box(b"moof", &payload)
 }
@@ -1096,11 +1207,12 @@ fn build_traf(
     samples: &[FragmentSample],
     base_media_decode_time: u64,
     data_offset: u32,
+    track_id: u32,
 ) -> Vec<u8> {
     let mut payload = Vec::new();
 
     // tfhd (track fragment header)
-    let tfhd = build_tfhd();
+    let tfhd = build_tfhd(track_id);
     payload.extend_from_slice(&tfhd);
 
     // tfdt (track fragment decode time)
@@ -1114,11 +1226,11 @@ fn build_traf(
     build_box(b"traf", &payload)
 }
 
-fn build_tfhd() -> Vec<u8> {
+fn build_tfhd(track_id: u32) -> Vec<u8> {
     // Flags: 0x020000 = default-base-is-moof
     let mut payload = Vec::new();
     payload.extend_from_slice(&0x0002_0000_u32.to_be_bytes()); // Version 0 + flags
-    payload.extend_from_slice(&1u32.to_be_bytes()); // Track ID
+    payload.extend_from_slice(&track_id.to_be_bytes()); // Track ID
     build_box(b"tfhd", &payload)
 }
 
