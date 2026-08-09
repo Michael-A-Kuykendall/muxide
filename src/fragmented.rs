@@ -1574,4 +1574,119 @@ mod tests {
         let result = FragmentedMuxer::new_audio_only(audio);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn two_track_muxer_creation_and_init_segment() {
+        let config = FragmentConfig::new(1920, 1080, 90000);
+        let audio = FragmentAudioConfig {
+            codec: AudioCodec::Aac(AacProfile::Lc),
+            sample_rate: 48000,
+            channels: 2,
+        };
+        let mut muxer = FragmentedMuxer::new_with_audio(config, audio).unwrap();
+
+        let init = muxer.init_segment();
+
+        // Verify ftyp box
+        assert_eq!(&init[4..8], b"ftyp");
+
+        // Find moov box
+        let ftyp_size = u32::from_be_bytes(init[0..4].try_into().unwrap()) as usize;
+        assert_eq!(&init[ftyp_size + 4..ftyp_size + 8], b"moov");
+
+        // Verify moov contains two trak boxes (video + audio)
+        let moov_data = &init[ftyp_size + 8..]; // moov payload
+        let trak_count = moov_data.windows(4).filter(|w| w == b"trak").count();
+        assert_eq!(
+            trak_count, 2,
+            "moov should contain two trak boxes (video + audio)"
+        );
+
+        // Verify mvex contains two trex boxes
+        let trex_count = moov_data.windows(4).filter(|w| w == b"trex").count();
+        assert_eq!(trex_count, 2, "mvex should contain two trex boxes");
+    }
+
+    #[test]
+    fn two_track_muxer_write_video_and_audio() {
+        let config = FragmentConfig::new(1920, 1080, 90000);
+        let audio = FragmentAudioConfig {
+            codec: AudioCodec::Aac(AacProfile::Lc),
+            sample_rate: 48000,
+            channels: 2,
+        };
+        let mut muxer = FragmentedMuxer::new_with_audio(config, audio).unwrap();
+
+        // Write video samples
+        let video_data = vec![0u8; 100];
+        muxer.write_video(0, 0, &video_data, true).unwrap();
+        muxer.write_video(3000, 3000, &video_data, false).unwrap();
+
+        // Write audio samples
+        let audio_data = vec![0u8; 50];
+        muxer.write_audio(0, 0, &audio_data).unwrap();
+        muxer.write_audio(1024, 1024, &audio_data).unwrap();
+
+        // Flush segment
+        let segment = muxer.flush_segment().unwrap();
+
+        // Verify moof has two traf boxes (one per track)
+        let traf_count = segment.windows(4).filter(|w| w == b"traf").count();
+        assert_eq!(
+            traf_count, 2,
+            "moof should contain two traf boxes (video + audio)"
+        );
+
+        // Verify mdat contains data
+        let mdat_pos = segment
+            .windows(4)
+            .position(|w| w == b"mdat")
+            .expect("mdat box");
+        assert!(mdat_pos > 0);
+
+        // Verify sequence number incremented
+        assert_eq!(muxer.sequence_number, 2);
+    }
+
+    #[test]
+    fn two_track_muxer_multiple_segments() {
+        let config = FragmentConfig {
+            fragment_duration_ms: 10,
+            ..FragmentConfig::new(1920, 1080, 90000)
+        };
+        let audio = FragmentAudioConfig {
+            codec: AudioCodec::Aac(AacProfile::Lc),
+            sample_rate: 48000,
+            channels: 2,
+        };
+        let mut muxer = FragmentedMuxer::new_with_audio(config, audio).unwrap();
+
+        let audio_data = vec![0u8; 50];
+
+        // Write first batch of frames (exceeds fragment_duration)
+        for i in 0..5 {
+            let pts = (i * 9000) as u64;
+            muxer.write_video(pts, pts, &[0u8; 100], i == 0).unwrap();
+            muxer.write_audio(pts, pts, &[0u8; 50]).unwrap();
+        }
+
+        // Flush first segment
+        assert!(muxer.ready_to_flush());
+        muxer.flush_segment().unwrap();
+
+        // Write second batch
+        for i in 5..10 {
+            let pts = (i * 9000) as u64;
+            muxer.write_video(pts, pts, &[0u8; 100], false).unwrap();
+            muxer.write_audio(pts, pts, &[0u8; 50]).unwrap();
+        }
+
+        // Flush second segment
+        assert!(muxer.ready_to_flush());
+        muxer.flush_segment().unwrap();
+
+        // Verify we got two segments worth of data
+        // The muxer should be ready for a third segment but we only wrote two batches
+        assert!(!muxer.ready_to_flush(), "no samples left after two flushes");
+    }
 }
