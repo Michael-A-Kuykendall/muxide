@@ -18,6 +18,7 @@ fn metadata_title_appears_in_udta_box() -> Result<(), Box<dyn std::error::Error>
         title: Some("Test Video Title".to_string()),
         creation_time: Some(3600), // 1 hour since 1904
         language: None,
+        chapters: Vec::new(),
     };
 
     let mut muxer = MuxerBuilder::new(writer)
