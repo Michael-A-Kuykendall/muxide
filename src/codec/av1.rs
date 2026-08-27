@@ -297,7 +297,15 @@ fn parse_sequence_header(obu_data: &[u8], header_size: usize) -> Option<Av1Confi
     } else {
         // timing_info_present_flag: 1 bit
         let timing_info_present = reader.read_bit()?;
-        if timing_info_present {
+        // decoder_model_info_present_flag is only present in the bitstream
+        // when timing_info_present_flag is set (AV1 spec 5.5.1); otherwise
+        // it is inferred as 0 and consumes no bits. Reading it
+        // unconditionally here (as this function previously did)
+        // misaligns every field that follows for any stream without a
+        // timing_info() block — which includes the sequence headers most
+        // encoders (e.g. rav1e) produce by default.
+        let mut buffer_delay_length = 0;
+        let decoder_model_info_present = if timing_info_present {
             // Skip timing_info
             reader.skip_bits(32)?; // num_units_in_display_tick
             reader.skip_bits(32)?; // time_scale
@@ -306,17 +314,19 @@ fn parse_sequence_header(obu_data: &[u8], header_size: usize) -> Option<Av1Confi
                 // Skip num_ticks_per_picture_minus_1 (uvlc)
                 skip_uvlc(&mut reader)?;
             }
-        }
 
-        // decoder_model_info_present_flag: 1 bit
-        let decoder_model_info_present = reader.read_bit()?;
-        let mut buffer_delay_length = 0;
-        if decoder_model_info_present {
-            buffer_delay_length = reader.read_bits(5)? as u8 + 1;
-            reader.skip_bits(32)?; // num_units_in_decoding_tick
-            reader.skip_bits(5)?; // buffer_removal_time_length
-            reader.skip_bits(5)?; // frame_presentation_time_length
-        }
+            // decoder_model_info_present_flag: 1 bit
+            let decoder_model_info_present = reader.read_bit()?;
+            if decoder_model_info_present {
+                buffer_delay_length = reader.read_bits(5)? as u8 + 1;
+                reader.skip_bits(32)?; // num_units_in_decoding_tick
+                reader.skip_bits(5)?; // buffer_removal_time_length
+                reader.skip_bits(5)?; // frame_presentation_time_length
+            }
+            decoder_model_info_present
+        } else {
+            false
+        };
 
         // initial_display_delay_present_flag: 1 bit
         let initial_display_delay_present = reader.read_bit()?;
@@ -900,5 +910,74 @@ mod tests {
         assert!(!cfg.high_bitdepth);
         assert!(!cfg.twelve_bit);
         assert!(!cfg.monochrome);
+    }
+
+    /// Regression test for a real-world interop bug: `parse_sequence_header`
+    /// previously read `decoder_model_info_present_flag` unconditionally,
+    /// but the AV1 spec (5.5.1) only puts that flag in the bitstream when
+    /// `timing_info_present_flag` is set — otherwise it's inferred as 0 and
+    /// consumes no bits. Reading the extra bit misaligned every field after
+    /// it. The all-zero payload in `test_parse_sequence_header_basic` above
+    /// doesn't catch this (a 1-bit shift across all-zero data still decodes
+    /// as all-zero), so this test uses a genuine sequence header captured
+    /// from `rav1e` 0.8.1 encoding a 64x32 frame — the exact case that
+    /// motivated this fix (see the linked issue/PR for the full repro).
+    #[test]
+    fn test_parse_sequence_header_matches_real_rav1e_output() {
+        // Captured verbatim from rav1e::Context::receive_packet's first
+        // (keyframe) packet, encoding a 64x32 8-bit 4:2:0 frame with an
+        // otherwise-default EncoderConfig. OBU header (0x0A) + LEB128 size
+        // (0x0A = 10 bytes) + the 10-byte sequence header payload.
+        let seq_header = [
+            0x0A, 0x0A, 0x00, 0x00, 0x00, 0xf9, 0x53, 0xff, 0x88, 0x42, 0xb0, 0x28,
+        ];
+
+        let config = parse_sequence_header(&seq_header[2..], 0);
+        let cfg = config.expect("a genuine rav1e sequence header must parse");
+        assert_eq!(cfg.seq_profile, 0);
+        // Before the fix this field (and everything derived from bits after
+        // decoder_model_info_present_flag) was misaligned; frame dimensions
+        // are the clearest, most externally-verifiable symptom of that.
+        assert_eq!(
+            frame_dimensions_for_test(&seq_header[2..]),
+            (64, 32),
+            "misaligned parsing would derive implausible dimensions (e.g. 2047x133) for this 64x32 stream"
+        );
+    }
+
+    /// Test-only helper: re-parses just enough of the sequence header to
+    /// recover `max_frame_width_minus_1`/`max_frame_height_minus_1`,
+    /// mirroring the same field order `parse_sequence_header` reads, so the
+    /// regression test above has an independently-verifiable expected
+    /// value rather than trusting `parse_sequence_header`'s own output.
+    #[cfg(test)]
+    fn frame_dimensions_for_test(payload: &[u8]) -> (u64, u64) {
+        let mut reader = BitReader::new(payload);
+        let _seq_profile = reader.read_bits(3).unwrap();
+        let _still_picture = reader.read_bit().unwrap();
+        let reduced = reader.read_bit().unwrap();
+        assert!(!reduced, "test helper only supports the non-reduced path");
+
+        let timing_info_present = reader.read_bit().unwrap();
+        assert!(!timing_info_present, "test helper only supports timing_info absent");
+        // decoder_model_info_present_flag: NOT present when timing_info_present is false.
+
+        let _initial_display_delay_present = reader.read_bit().unwrap();
+        let op_cnt = reader.read_bits(5).unwrap() + 1;
+        for i in 0..op_cnt {
+            reader.skip_bits(12).unwrap();
+            let level_idx = reader.read_bits(5).unwrap();
+            if level_idx > 7 {
+                reader.read_bit().unwrap();
+            }
+            if i == 0 {
+                // nothing further needed from this operating point for this helper
+            }
+        }
+        let frame_width_bits = reader.read_bits(4).unwrap() + 1;
+        let frame_height_bits = reader.read_bits(4).unwrap() + 1;
+        let max_width = reader.read_bits(frame_width_bits as usize).unwrap() + 1;
+        let max_height = reader.read_bits(frame_height_bits as usize).unwrap() + 1;
+        (max_width, max_height)
     }
 }
