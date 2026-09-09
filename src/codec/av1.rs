@@ -308,8 +308,19 @@ fn parse_sequence_header(obu_data: &[u8], header_size: usize) -> Option<Av1Confi
             }
         }
 
-        // decoder_model_info_present_flag: 1 bit
-        let decoder_model_info_present = reader.read_bit()?;
+        // decoder_model_info_present_flag: 1 bit.
+        //
+        // Per AV1 spec 5.5.1, this flag is present in the bitstream ONLY when
+        // timing_info_present_flag is 1; otherwise it is inferred to be 0 and
+        // no bit is read. Reading it unconditionally shifts every subsequent
+        // field by one bit, which for a typical stream (no timing info) makes
+        // the reader run past the end of the payload and return None — so a
+        // perfectly valid Sequence Header OBU looks absent.
+        let decoder_model_info_present = if timing_info_present {
+            reader.read_bit()?
+        } else {
+            false
+        };
         let mut buffer_delay_length = 0;
         if decoder_model_info_present {
             buffer_delay_length = reader.read_bits(5)? as u8 + 1;
@@ -901,4 +912,25 @@ mod tests {
         assert!(!cfg.twelve_bit);
         assert!(!cfg.monochrome);
     }
+
+    /// A real Sequence Header OBU produced by SVT-AV1 (320x240, 8-bit 4:2:0,
+    /// main profile, no timing info).
+    ///
+    /// Regression guard: reading decoder_model_info_present_flag
+    /// unconditionally made this parse fail, and `extract_av1_config`
+    /// returned None for every stream without timing info — which is nearly
+    /// all of them.
+    #[test]
+    fn test_sequence_header_without_timing_info() {
+        let obu = [
+            0x0a, 0x0b, 0x02, 0x00, 0x00, 0x05, 0x21, 0xe7, 0xfd, 0xe0, 0x17, 0xc0, 0x02,
+        ];
+        let config = extract_av1_config(&obu).expect("sequence header must parse");
+        assert_eq!(config.seq_profile, 0);
+        assert!(!config.high_bitdepth);
+        assert!(!config.monochrome);
+        assert!(config.chroma_subsampling_x);
+        assert!(config.chroma_subsampling_y);
+    }
+
 }
