@@ -14,7 +14,8 @@
 //! - Accepts encoded AAC/Opus audio frames with timestamps  
 //! - Outputs MP4 files with fast-start (moov before mdat) for instant web playback
 //! - Supports B-frames via explicit PTS/DTS
-//! - Supports fragmented MP4 (fMP4) for DASH/HLS streaming
+//! - Supports fragmented MP4 (fMP4) for DASH/HLS streaming, including audio-only
+//!   and two-track output. `muxide::dash` builds a static MPD from that output.
 //!
 //! ## What Muxide Does NOT Do
 //!
@@ -63,6 +64,9 @@ pub mod validation;
 // Invariant PPT testing framework (internal; not part of the public API)
 #[doc(hidden)]
 pub mod invariant_ppt;
+
+// DASH MPD manifest builder
+pub mod dash;
 
 // C FFI layer for language bindings (Go, Python, etc.)
 pub mod ffi;

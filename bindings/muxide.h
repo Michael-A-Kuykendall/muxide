@@ -49,6 +49,7 @@ size_t muxide_output_copy(const MuxideMuxer* handle, uint8_t* buf, size_t buf_le
 size_t muxide_last_error(char* buf, size_t buf_len);
 
 /* --- Fragmented MP4 --- */
+/* Returns NULL when width or height is outside 1..=65535. */
 MuxideFragmentedMuxer* muxide_fragmented_new(int32_t video_codec, uint32_t width, uint32_t height,
                                               const uint8_t* sps, size_t sps_len,
                                               const uint8_t* pps, size_t pps_len);

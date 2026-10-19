@@ -5,7 +5,7 @@
   <a href="https://crates.io/crates/muxide"><img src="https://img.shields.io/crates/d/muxide.svg" alt="Downloads"></a>
   <a href="https://docs.rs/muxide"><img src="https://docs.rs/muxide/badge.svg" alt="Documentation"></a>
     <a href="#license"><img src="https://img.shields.io/crates/l/muxide.svg" alt="License"></a>
-    <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/MSRV-1.74-blue.svg" alt="MSRV"></a>
+    <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/MSRV-1.86-blue.svg" alt="MSRV"></a>
   <a href="https://github.com/Michael-A-Kuykendall/muxide/actions"><img src="https://github.com/Michael-A-Kuykendall/muxide/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
@@ -101,7 +101,7 @@ muxide validate --video input.h264 --audio input.aac
 muxide info input.mp4
 ```
 
-The CLI tool accepts hex-encoded input files and produces MP4 output.
+The CLI tool accepts hex-encoded input files and `.frames` records, and produces MP4 output.
 
 ## Core Invariant
 
@@ -130,7 +130,10 @@ If input violates the contract, Muxide **fails fast** with explicit errors—no 
 | | Opus | Raw packets, 48kHz |
 | **Container** | Fast-start | `moov` before `mdat` for web playback |
 | | B-frames | Explicit PTS/DTS support |
-| | Fragmented MP4 | For DASH/HLS streaming |
+| | Fragmented MP4 | Video-only, audio-only, or both tracks, for DASH/HLS |
+| | Audio-only | Progressive MP4 and fMP4 with no video track |
+| | Chapters | `chpl` box in `udta` |
+| | DASH MPD | `muxide::dash` builds a static MPD from fMP4 output |
 | | Metadata | Title, creation time, language |
 | **Quality** | Detailed error reporting | Hex dumps, JSON output, actionable messages |
 | | Production tested | FFmpeg compatibility verified |
@@ -279,6 +282,8 @@ if let Some(segment) = muxer.flush_segment() {
 }
 ```
 
+Audio-only fMP4 is `FragmentedMuxer::new_audio_only`. Video plus audio is `FragmentedMuxer::new_with_audio`; both constructors return `Result`. On those muxers, audio timestamps are sample counts at the audio sample rate. An audio-only media segment uses track id 1. A two-track segment uses track 1 for video and track 2 for audio, and each `trun` offset points at that track's bytes.
+
 ### B-Frames with Explicit DTS
 
 ```rust
@@ -341,6 +346,7 @@ muxide info input.mp4
 - Comprehensive error messages
 - Fast-start MP4 layout by default
 - Metadata support (title, language, creation time)
+- `--audio` requires `--sample-rate` and `--channels`
 
 ---
 

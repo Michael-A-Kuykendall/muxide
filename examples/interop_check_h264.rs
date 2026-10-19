@@ -86,7 +86,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         vp9_config: None,
     };
 
-    let mut fmux = FragmentedMuxer::new(cfg);
+    let mut fmux = FragmentedMuxer::new(cfg)?;
     let init = fmux.init_segment();
 
     let f0 = annexb_to_avcc(&frame0);

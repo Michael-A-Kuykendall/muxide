@@ -378,8 +378,12 @@ pub extern "C" fn muxide_fragmented_new(
         vp9_config: None,
     };
 
+    let inner = match FragmentedMuxer::new(config) {
+        Ok(inner) => inner,
+        Err(_) => return std::ptr::null_mut(),
+    };
     Box::into_raw(Box::new(MuxideFragmentedMuxer {
-        inner: FragmentedMuxer::new(config),
+        inner,
         output: Vec::new(),
     }))
 }

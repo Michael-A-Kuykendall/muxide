@@ -4,6 +4,8 @@
 
 This project uses **Predictive Property-Based Testing (PPT)** combined with **runtime invariant enforcement**. This methodology is preferred over traditional TDD for projects with rapidly evolving logic.
 
+`assert_invariant!` panics when the condition is false, including in release builds. Only the invariant log used by `contract_test` is compiled in when debug assertions are enabled.
+
 ## Core Philosophy
 
 1. **Properties over Implementations** - Test what must always be true, not specific outputs

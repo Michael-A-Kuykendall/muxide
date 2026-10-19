@@ -7,7 +7,7 @@
 
 use crate::codec::av1::is_av1_keyframe;
 use crate::codec::vp9::is_vp9_keyframe;
-use crate::fragmented::{FragmentAudioConfig, FragmentConfig, FragmentedMuxer};
+use crate::fragmented::{FragmentAudioConfig, FragmentConfig, FragmentedError, FragmentedMuxer};
 use crate::muxer::mp4::{Mp4AudioTrack, Mp4VideoTrack, Mp4Writer, Mp4WriterError, MEDIA_TIMESCALE};
 use std::fmt;
 use std::io::Write;
@@ -462,6 +462,19 @@ impl<Writer> MuxerBuilder<Writer> {
             return Err(MuxerError::MissingTrackConfig);
         }
 
+        if let Some(video) = &video_track {
+            if video.width == 0
+                || video.height == 0
+                || video.width > u32::from(u16::MAX)
+                || video.height > u32::from(u16::MAX)
+            {
+                return Err(MuxerError::InvalidDimensions {
+                    width: video.width,
+                    height: video.height,
+                });
+            }
+        }
+
         let mut writer = match &video_track {
             Some(video) => Mp4Writer::new(self.writer, video.codec),
             None => Mp4Writer::new_audio_only(self.writer),
@@ -506,6 +519,16 @@ impl<Writer> MuxerBuilder<Writer> {
     /// Returns an error if neither video nor audio configuration is present,
     /// the codec is unsupported, or required codec parameters are missing.
     pub fn new_with_fragment(self) -> Result<FragmentedMuxer, MuxerError> {
+        if let Some((_, width, height, _)) = self.video {
+            if width == 0
+                || height == 0
+                || width > u32::from(u16::MAX)
+                || height > u32::from(u16::MAX)
+            {
+                return Err(MuxerError::InvalidDimensions { width, height });
+            }
+        }
+
         // Audio-only fragmented MP4 when no video track is configured.
         let Some((codec, width, height, _framerate)) = self.video else {
             if let Some((audio_codec, sample_rate, channels)) = self.audio {
@@ -594,7 +617,15 @@ impl<Writer> MuxerBuilder<Writer> {
             vp9_config,
         };
 
-        Ok(FragmentedMuxer::new(config))
+        FragmentedMuxer::new(config).map_err(|err| match err {
+            FragmentedError::InvalidDimensions { width, height } => {
+                MuxerError::InvalidDimensions { width, height }
+            }
+            other => MuxerError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                other.to_string(),
+            )),
+        })
     }
 }
 
@@ -744,6 +775,12 @@ pub enum MuxerError {
         curr_dts: f64,
         frame_index: u64,
     },
+    /// Video width or height is outside `1..=65535`.
+    InvalidDimensions { width: u32, height: u32 },
+    /// `encode_video` was called with `duration_ms == 0`.
+    ZeroVideoDuration { frame_index: u64 },
+    /// `encode_audio` was called with `samples == 0`.
+    ZeroAudioDuration { frame_index: u64 },
 }
 
 impl From<std::io::Error> for MuxerError {
@@ -849,6 +886,24 @@ impl fmt::Display for MuxerError {
                 write!(f, "video frame {} has DTS {:.3}s which is not greater than previous DTS {:.3}s: \
                           DTS (decode timestamps) must strictly increase",
                        frame_index, curr_dts, prev_dts)
+            }
+            MuxerError::InvalidDimensions { width, height } => {
+                write!(
+                    f,
+                    "video dimensions {width}x{height} are outside the supported range 1..=65535"
+                )
+            }
+            MuxerError::ZeroVideoDuration { frame_index } => {
+                write!(
+                    f,
+                    "video frame {frame_index} has duration 0: duration_ms must be greater than zero"
+                )
+            }
+            MuxerError::ZeroAudioDuration { frame_index } => {
+                write!(
+                    f,
+                    "audio frame {frame_index} has sample count 0: samples must be greater than zero"
+                )
             }
         }
     }
@@ -1135,6 +1190,11 @@ impl<Writer: Write> Muxer<Writer> {
                 frame_index: self.video_frame_count,
             });
         }
+        if duration_ms == 0 {
+            return Err(MuxerError::ZeroVideoDuration {
+                frame_index: self.video_frame_count,
+            });
+        }
         let pts = self.current_video_pts;
         let is_keyframe = self.is_keyframe(data);
         self.write_video(pts, data, is_keyframe)?;
@@ -1156,6 +1216,11 @@ impl<Writer: Write> Muxer<Writer> {
             return Err(MuxerError::AudioNotConfigured);
         };
         let sample_rate = audio_track.sample_rate;
+        if samples == 0 {
+            return Err(MuxerError::ZeroAudioDuration {
+                frame_index: self.audio_frame_count,
+            });
+        }
         let pts = self.current_audio_pts;
         self.write_audio(pts, data)?;
         self.current_audio_pts += samples as f64 / sample_rate as f64;
@@ -1313,6 +1378,34 @@ mod tests {
         muxer.finish()?;
         assert!(!buffer.is_empty());
         Ok(())
+    }
+
+    #[test]
+    fn encode_video_rejects_zero_duration() {
+        let mut muxer = MuxerBuilder::new(Vec::<u8>::new())
+            .video(VideoCodec::H264, 320, 240, 30.0)
+            .build()
+            .unwrap();
+        let frame = make_h264_keyframe();
+        let err = muxer.encode_video(&frame, 0).unwrap_err();
+        assert!(matches!(
+            err,
+            MuxerError::ZeroVideoDuration { frame_index: 0 }
+        ));
+        muxer.encode_video(&frame, 33).unwrap();
+    }
+
+    #[test]
+    fn encode_audio_rejects_zero_samples() {
+        let mut muxer = MuxerBuilder::new(Vec::<u8>::new())
+            .audio(AudioCodec::Aac(AacProfile::Lc), 48_000, 2)
+            .build()
+            .unwrap();
+        let err = muxer.encode_audio(&[0xff, 0xf1], 0).unwrap_err();
+        assert!(matches!(
+            err,
+            MuxerError::ZeroAudioDuration { frame_index: 0 }
+        ));
     }
 
     #[test]

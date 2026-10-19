@@ -6,6 +6,7 @@
 mod support;
 
 use muxide::api::{AacProfile, AudioCodec, MuxerBuilder, MuxerError, VideoCodec};
+use muxide::fragmented::{FragmentConfig, FragmentedError, FragmentedMuxer};
 use std::{fs, path::Path};
 use support::SharedBuffer;
 
@@ -553,4 +554,43 @@ fn error_messages_are_educational() {
             msg
         );
     }
+}
+
+#[test]
+fn width_above_u16_is_an_error() {
+    let err = MuxerBuilder::new(Vec::<u8>::new())
+        .video(VideoCodec::H264, 70_000, 1080, 30.0)
+        .build();
+    assert!(matches!(
+        err,
+        Err(MuxerError::InvalidDimensions {
+            width: 70_000,
+            height: 1080
+        })
+    ));
+
+    let err = MuxerBuilder::new(Vec::<u8>::new())
+        .video(VideoCodec::H264, 0, 1080, 30.0)
+        .build();
+    assert!(matches!(
+        err,
+        Err(MuxerError::InvalidDimensions { width: 0, .. })
+    ));
+
+    let err = MuxerBuilder::new(Vec::<u8>::new())
+        .video(VideoCodec::H264, 70_000, 1080, 30.0)
+        .new_with_fragment();
+    assert!(matches!(err, Err(MuxerError::InvalidDimensions { .. })));
+
+    assert!(MuxerBuilder::new(Vec::<u8>::new())
+        .video(VideoCodec::H264, 1, 1, 30.0)
+        .build()
+        .is_ok());
+
+    let fragmented = FragmentedMuxer::new(FragmentConfig::new(70_000, 1080, 90_000));
+    assert!(matches!(
+        fragmented,
+        Err(FragmentedError::InvalidDimensions { width: 70_000, .. })
+    ));
+    assert!(FragmentedMuxer::new(FragmentConfig::new(1, 1, 90_000)).is_ok());
 }

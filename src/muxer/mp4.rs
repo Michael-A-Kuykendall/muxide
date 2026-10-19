@@ -1520,12 +1520,8 @@ fn build_moov_box(
     video_config: &VideoConfig,
     metadata: Option<&Metadata>,
 ) -> Vec<u8> {
-    // Calculate duration in media timescale, then convert to movie timescale (ms)
-    let video_duration_media = video_tables.total_duration();
-    let video_duration_ms =
-        (video_duration_media * MOVIE_TIMESCALE as u64 / MEDIA_TIMESCALE as u64) as u32;
-
-    let mvhd_payload = build_mvhd_payload(video_duration_ms, if audio.is_some() { 3 } else { 2 });
+    let video_duration = movie_duration(video_tables.total_duration());
+    let mvhd_payload = build_mvhd_payload(video_duration, if audio.is_some() { 3 } else { 2 });
     let mvhd_box = build_box(b"mvhd", &mvhd_payload);
     let trak_box = build_trak_box(video, video_tables, video_config, metadata);
 
@@ -1554,10 +1550,8 @@ fn build_audio_only_moov_box(
     audio_tables: &SampleTables,
     metadata: Option<&Metadata>,
 ) -> Vec<u8> {
-    let duration_ms =
-        (audio_tables.total_duration() * MOVIE_TIMESCALE as u64 / MEDIA_TIMESCALE as u64) as u32;
-
-    let mvhd_payload = build_mvhd_payload(duration_ms, 3);
+    let duration = movie_duration(audio_tables.total_duration());
+    let mvhd_payload = build_mvhd_payload(duration, 3);
     let mvhd_box = build_box(b"mvhd", &mvhd_payload);
     let audio_trak = build_audio_trak_box(audio, audio_tables, metadata);
 
@@ -1590,9 +1584,7 @@ fn build_audio_trak_box(
 }
 
 fn build_audio_tkhd_box(tables: &SampleTables) -> Vec<u8> {
-    let duration_ms =
-        (tables.total_duration() * MOVIE_TIMESCALE as u64 / MEDIA_TIMESCALE as u64) as u32;
-    build_tkhd_box_with_id(2, 0x0100, 0, 0, duration_ms)
+    build_tkhd_box_with_id(2, 0x0100, 0, 0, movie_duration(tables.total_duration()))
 }
 
 fn build_audio_mdia_box(
@@ -2153,15 +2145,14 @@ fn build_hvcc_box(hevc_config: &HevcConfig) -> Vec<u8> {
         | (general_profile_idc & 0x1f);
     payload.push(byte1);
 
-    // general_profile_compatibility_flags (4 bytes)
-    // For simplicity, set Main profile compatibility (bit 1)
-    payload.extend_from_slice(&[0x60, 0x00, 0x00, 0x00]);
-
-    // general_constraint_indicator_flags (6 bytes)
-    payload.extend_from_slice(&[0x90, 0x00, 0x00, 0x00, 0x00, 0x00]);
-
-    // general_level_idc
-    payload.push(general_level_idc);
+    if let Some(ptl) = hevc_config.general_profile_tier_level() {
+        // compatibility flags (4) + constraint indicator (6) + level (1)
+        payload.extend_from_slice(&ptl[1..12]);
+    } else {
+        payload.extend_from_slice(&[0x60, 0x00, 0x00, 0x00]);
+        payload.extend_from_slice(&[0x90, 0x00, 0x00, 0x00, 0x00, 0x00]);
+        payload.push(general_level_idc);
+    }
 
     // min_spatial_segmentation_idc (12 bits) with reserved (4 bits)
     payload.extend_from_slice(&[0xf0, 0x00]);
@@ -2489,10 +2480,19 @@ fn build_smhd_box() -> Vec<u8> {
     build_box(b"smhd", &payload)
 }
 
+/// Movie-timescale duration (1000 Hz) from a 90 kHz media duration.
+fn movie_duration(media_duration: u64) -> u64 {
+    (u128::from(media_duration) * u128::from(MOVIE_TIMESCALE) / u128::from(MEDIA_TIMESCALE)) as u64
+}
+
 fn build_tkhd_box(video: &Mp4VideoTrack, tables: &SampleTables) -> Vec<u8> {
-    let duration_ms =
-        (tables.total_duration() * MOVIE_TIMESCALE as u64 / MEDIA_TIMESCALE as u64) as u32;
-    build_tkhd_box_with_id(1, 0, video.width, video.height, duration_ms)
+    build_tkhd_box_with_id(
+        1,
+        0,
+        video.width,
+        video.height,
+        movie_duration(tables.total_duration()),
+    )
 }
 
 fn build_tkhd_box_with_id(
@@ -2500,16 +2500,26 @@ fn build_tkhd_box_with_id(
     volume: u16,
     width: u32,
     height: u32,
-    _duration_ms: u32,
+    duration: u64,
 ) -> Vec<u8> {
     let mut payload = Vec::new();
-    // version=0 (1 byte) + flags=0x000003 track_enabled|track_in_movie (3 bytes)
-    payload.extend_from_slice(&0x0000_0003u32.to_be_bytes());
-    payload.extend_from_slice(&0u32.to_be_bytes());
-    payload.extend_from_slice(&0u32.to_be_bytes());
-    payload.extend_from_slice(&track_id.to_be_bytes());
-    payload.extend_from_slice(&0u32.to_be_bytes()); // reserved
-    payload.extend_from_slice(&0u32.to_be_bytes()); // duration
+    if duration > u64::from(u32::MAX) {
+        // Version 1: 64-bit creation/modification time and duration.
+        payload.extend_from_slice(&0x0100_0003u32.to_be_bytes());
+        payload.extend_from_slice(&0u64.to_be_bytes());
+        payload.extend_from_slice(&0u64.to_be_bytes());
+        payload.extend_from_slice(&track_id.to_be_bytes());
+        payload.extend_from_slice(&0u32.to_be_bytes()); // reserved
+        payload.extend_from_slice(&duration.to_be_bytes());
+    } else {
+        // version=0 + flags=0x000003 track_enabled|track_in_movie
+        payload.extend_from_slice(&0x0000_0003u32.to_be_bytes());
+        payload.extend_from_slice(&0u32.to_be_bytes());
+        payload.extend_from_slice(&0u32.to_be_bytes());
+        payload.extend_from_slice(&track_id.to_be_bytes());
+        payload.extend_from_slice(&0u32.to_be_bytes()); // reserved
+        payload.extend_from_slice(&(duration as u32).to_be_bytes());
+    }
     payload.extend_from_slice(&0u32.to_be_bytes()); // reserved[0]
     payload.extend_from_slice(&0u32.to_be_bytes()); // reserved[1]
     payload.extend_from_slice(&0u16.to_be_bytes());
@@ -2545,13 +2555,21 @@ fn build_ftyp_box() -> Vec<u8> {
     build_box(b"ftyp", &payload)
 }
 
-fn build_mvhd_payload(duration_ms: u32, next_track_id: u32) -> Vec<u8> {
+fn build_mvhd_payload(duration: u64, next_track_id: u32) -> Vec<u8> {
     let mut payload = Vec::new();
-    payload.extend_from_slice(&0u32.to_be_bytes()); // version + flags
-    payload.extend_from_slice(&0u32.to_be_bytes()); // creation_time
-    payload.extend_from_slice(&0u32.to_be_bytes()); // modification_time
-    payload.extend_from_slice(&MOVIE_TIMESCALE.to_be_bytes()); // timescale (1000 = ms)
-    payload.extend_from_slice(&duration_ms.to_be_bytes()); // duration in ms
+    if duration > u64::from(u32::MAX) {
+        payload.extend_from_slice(&0x0100_0000u32.to_be_bytes()); // version 1
+        payload.extend_from_slice(&0u64.to_be_bytes()); // creation_time
+        payload.extend_from_slice(&0u64.to_be_bytes()); // modification_time
+        payload.extend_from_slice(&MOVIE_TIMESCALE.to_be_bytes());
+        payload.extend_from_slice(&duration.to_be_bytes());
+    } else {
+        payload.extend_from_slice(&0u32.to_be_bytes()); // version + flags
+        payload.extend_from_slice(&0u32.to_be_bytes()); // creation_time
+        payload.extend_from_slice(&0u32.to_be_bytes()); // modification_time
+        payload.extend_from_slice(&MOVIE_TIMESCALE.to_be_bytes()); // timescale (1000 = ms)
+        payload.extend_from_slice(&(duration as u32).to_be_bytes());
+    }
     payload.extend_from_slice(&0x0001_0000_u32.to_be_bytes()); // rate (1.0)
     payload.extend_from_slice(&0x0100u16.to_be_bytes()); // volume (1.0)
     payload.extend_from_slice(&0u16.to_be_bytes()); // reserved
@@ -2766,6 +2784,20 @@ fn is_leap_year(year: u32) -> bool {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn tkhd_version_1_when_movie_duration_exceeds_u32() {
+        let duration = u64::from(u32::MAX) + 1;
+        let tkhd = build_tkhd_box_with_id(1, 0, 16, 16, duration);
+        assert_eq!(tkhd[8], 1, "version byte");
+        let stored = u64::from_be_bytes(tkhd[36..44].try_into().unwrap());
+        assert_eq!(stored, duration);
+
+        let mvhd = build_mvhd_payload(duration, 2);
+        assert_eq!(mvhd[0], 1, "mvhd version byte is the first payload byte");
+        let mvhd_duration = u64::from_be_bytes(mvhd[24..32].try_into().unwrap());
+        assert_eq!(mvhd_duration, duration);
+    }
 
     fn h264_keyframe() -> Vec<u8> {
         vec![

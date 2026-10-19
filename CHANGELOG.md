@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+## 0.5.0 (October 19, 2026) - Playback correctness
+
+### ✨ New Features
+- **DASH MPD manifest builder** (`muxide-1uq.4`): `muxide::dash` generates a minimal static MPD from fragmented MP4 output. `MpdConfig`, `DashTrackInfo`, `DashSegment`, and `build_mpd()`.
+- **Two-track FragmentedMuxer** (`muxide-9hl.4`): `FragmentedMuxer::new_with_audio` writes video track 1 and audio track 2. Audio timestamps are in samples at the audio sample rate.
+- **Chapter markers** (`muxide-1uq.3`): `Metadata::chapters` emits a `chpl` box.
+- **Async fMP4 muxer** (`muxide-1uq.2`): `AsyncFragmentedMuxer` behind the `async` feature. `new` now returns `Result`.
+- **Multi-frame CLI muxing** (`muxide-bt1.2`): the CLI reads `.frames` records as well as hex blobs.
+
+### 🐛 Bug Fixes
+- **Audio-only fMP4 media segments used track id 2.** The init segment's `trex` says track 1. `moof` now uses track 1 when the muxer has no video track, and track 2 when a video track exists. Each `trun` `data_offset` points at that track's bytes in `mdat` (GitHub issue #2).
+- **`tkhd` duration was always 0** in progressive MP4. Video and audio `tkhd` now store the track duration in the movie timescale (1000). Durations above `u32::MAX` use a version-1 box, matching `mvhd`. Fragmented `tkhd` duration stays 0.
+- **AV1 sequence headers without timing info failed to parse.** `decoder_model_info_present_flag` is read only when `timing_info_present_flag` is set (AV1 spec 5.5.1). Credit: thoroc, PR #9.
+- **Two-track fMP4 audio ran on the video clock.** The audio `mdhd` timescale is the sample rate. A single AAC sample lasts 1024 samples; a single Opus packet uses its TOC duration, or 960 samples when the packet has no TOC. Video's single-sample fallback stays one frame at 30 fps (`timescale / 30`).
+- **`hvcC` compatibility and constraint flags** are copied from SPS bytes 4..15 in both the progressive and fragmented writers. `lengthSizeMinusOne` stays 3.
+- **`encode_video(duration_ms: 0)` and `encode_audio(samples: 0)`** are rejected on that call (`ZeroVideoDuration`, `ZeroAudioDuration`) instead of failing the next write.
+- **`FragmentedError`**: `write_video` on an audio-only muxer returns `VideoTrackNotConfigured`. The audio error no longer says samples can only be written to an audio-only muxer.
+- **Dimensions outside `1..=65535`** are `MuxerError::InvalidDimensions` from `MuxerBuilder::build` / `new_with_fragment`, and `FragmentedError::InvalidDimensions` from `FragmentedMuxer::new` / `new_with_audio`. Values are not truncated to `u16`.
+- **CLI**: `--audio` without `--sample-rate` and `--channels` fails and names those flags.
+
+### ⚠️ Breaking changes (0.x)
+- `FragmentedMuxer::new` and `AsyncFragmentedMuxer::new` return `Result`. `muxide_fragmented_new` returns a null pointer when the dimensions are rejected.
+
+### 📝 Documentation
+- MSRV badges and `CONTRIBUTING.md` say 1.86. The contributing guide no longer claims the project has no FFI.
+- `assert_invariant!` still panics in release builds. Only the invariant log is debug-only. Docs match that.
+- `docs/contract.md` is the 0.5.0 contract: audio-only is valid, dimensions are `1..=65535`, and fragmented constructors that take video dimensions return `Result`. `docs/charter.md`, `ROADMAP.md`, the READMEs, and `bindings/muxide.h` match.
+
 ## 0.4.0 (July 27, 2026) - Audio-Only MP4, Dependency Upgrades & MSRV Bump
 
 ### ✨ New Features

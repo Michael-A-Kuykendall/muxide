@@ -437,3 +437,21 @@ fn cli_output_is_ascii() {
         assert!(byte < 0x80, "non-ASCII byte 0x{:02x} in CLI output", byte);
     }
 }
+
+#[test]
+fn audio_without_sample_rate_names_the_flag() {
+    let output = Command::new(env!("CARGO_BIN_EXE_muxide"))
+        .args(["mux", "--audio", "clip.aac", "--output", "out.mp4"])
+        .output()
+        .expect("run muxide");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--sample-rate"),
+        "stderr should name --sample-rate: {stderr}"
+    );
+    assert!(
+        stderr.contains("--channels"),
+        "stderr should name --channels: {stderr}"
+    );
+}

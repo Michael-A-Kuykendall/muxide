@@ -35,3 +35,4 @@ fMP4 yields self-contained byte segments and already has a flush contract; that 
 - Default build unchanged (no tokio dep).
 - Async path only available behind `async` feature.
 - Classic muxer remains synchronous.
+- As of 0.5.0, `AsyncFragmentedMuxer::new` returns `Result`, matching `FragmentedMuxer::new`.

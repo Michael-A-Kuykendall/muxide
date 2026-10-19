@@ -106,6 +106,19 @@ impl HevcConfig {
     pub fn general_level_idc(&self) -> u8 {
         self.sps.get(14).copied().unwrap_or(93)
     }
+
+    /// Profile-tier-level bytes at the fixed SPS offsets this crate already uses.
+    ///
+    /// Byte 3 is `general_profile_space` / tier / `profile_idc`, bytes 4..8 are
+    /// `general_profile_compatibility_flags`, bytes 8..14 are the constraint
+    /// indicator, and byte 14 is `general_level_idc`. Returns `None` when the
+    /// SPS is shorter than that prefix.
+    pub fn general_profile_tier_level(&self) -> Option<[u8; 12]> {
+        let bytes = self.sps.get(3..15)?;
+        let mut out = [0u8; 12];
+        out.copy_from_slice(bytes);
+        Some(out)
+    }
 }
 
 /// Extract the NAL unit type from an H.265 NAL header.

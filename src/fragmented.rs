@@ -16,7 +16,7 @@
 //!
 //! 2. **Audio-only** — Created with [`FragmentedMuxer::new_audio_only`]. Contains a
 //!    single audio track (track ID 1). Use [`write_audio`] to queue samples.
-//!    [`write_video`] will return [`FragmentedError::AudioTrackNotConfigured`].
+//!    [`write_video`] will return [`FragmentedError::VideoTrackNotConfigured`].
 //!
 //! 3. **Video + Audio (two-track)** — Created with [`FragmentedMuxer::new_with_audio`].
 //!    Contains a video track (track ID 1) and an audio track (track ID 2).
@@ -95,7 +95,7 @@
 //! use muxide::fragmented::{FragmentConfig, FragmentedMuxer};
 //!
 //! let config = FragmentConfig::new(1920, 1080, 90000);
-//! let mut muxer = FragmentedMuxer::new(config);
+//! let mut muxer = FragmentedMuxer::new(config)?;
 //!
 //! let init = muxer.init_segment();
 //! let frame_data = vec![0u8; 100];
@@ -106,6 +106,7 @@
 //! ```
 
 use crate::api::AudioCodec;
+use crate::codec::opus_packet_samples;
 use crate::muxer::mp4::{build_mp4a_box, build_opus_box, encode_language_code, Mp4AudioTrack};
 
 /// Errors that can occur during fragmented MP4 muxing.
@@ -114,8 +115,12 @@ use crate::muxer::mp4::{build_mp4a_box, build_opus_box, encode_language_code, Mp
 pub enum FragmentedError {
     /// DTS values must be non-decreasing.
     NonMonotonicDts { prev_dts: u64, curr_dts: u64 },
-    /// Audio samples can only be written to an audio-only muxer.
+    /// `write_audio` was called on a muxer that has no audio track.
     AudioTrackNotConfigured,
+    /// `write_video` was called on a muxer that has no video track.
+    VideoTrackNotConfigured,
+    /// Video width or height is outside `1..=65535`.
+    InvalidDimensions { width: u32, height: u32 },
 }
 
 impl std::error::Error for FragmentedError {}
@@ -131,13 +136,26 @@ impl std::fmt::Display for FragmentedError {
                 )
             }
             FragmentedError::AudioTrackNotConfigured => {
+                write!(f, "audio track is not configured on this muxer")
+            }
+            FragmentedError::VideoTrackNotConfigured => {
+                write!(f, "video track is not configured on this muxer")
+            }
+            FragmentedError::InvalidDimensions { width, height } => {
                 write!(
                     f,
-                    "audio samples can only be written to an audio-only muxer; \
-                     use FragmentedMuxer::new_audio_only() for audio output"
+                    "video dimensions {width}x{height} are outside the supported range 1..=65535"
                 )
             }
         }
+    }
+}
+
+fn validate_visual_dimensions(width: u32, height: u32) -> Result<(), FragmentedError> {
+    if width == 0 || height == 0 || width > u32::from(u16::MAX) || height > u32::from(u16::MAX) {
+        Err(FragmentedError::InvalidDimensions { width, height })
+    } else {
+        Ok(())
     }
 }
 
@@ -254,12 +272,6 @@ impl TrackSamples {
     }
 }
 
-/// Fallback single-frame duration in 90 kHz timescale ticks (1 frame @ 30 fps).
-///
-/// Used when only one sample is available and the real duration cannot be inferred
-/// from adjacent timestamps. Equivalent to `90000 / 30 = 3000`.
-const FALLBACK_FRAME_DURATION_TICKS: u64 = 3000;
-
 /// A fragmented MP4 muxer for streaming applications.
 #[derive(Debug)]
 pub struct FragmentedMuxer {
@@ -274,8 +286,14 @@ pub struct FragmentedMuxer {
 
 impl FragmentedMuxer {
     /// Create a new fragmented muxer with the given (video) configuration.
-    pub fn new(config: FragmentConfig) -> Self {
-        Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FragmentedError::InvalidDimensions`] when `width` or `height`
+    /// is outside `1..=65535`.
+    pub fn new(config: FragmentConfig) -> Result<Self, FragmentedError> {
+        validate_visual_dimensions(config.width, config.height)?;
+        Ok(Self {
             config,
             audio: None,
             has_video: true,
@@ -283,7 +301,7 @@ impl FragmentedMuxer {
             audio_track: TrackSamples::new(),
             sequence_number: 1,
             init_segment: None,
-        }
+        })
     }
 
     /// Create a new fragmented muxer with both video and audio tracks.
@@ -294,7 +312,11 @@ impl FragmentedMuxer {
     ///
     /// # Errors
     ///
-    /// Returns an error if the audio codec is `AudioCodec::None`.
+    /// Returns an error if the audio codec is `AudioCodec::None`, or if the
+    /// video dimensions are outside `1..=65535`.
+    ///
+    /// Audio timestamps passed to [`write_audio`](Self::write_audio) are in
+    /// audio samples (the audio sample rate), not the video timescale.
     pub fn new_with_audio(
         config: FragmentConfig,
         audio: FragmentAudioConfig,
@@ -302,6 +324,7 @@ impl FragmentedMuxer {
         if audio.codec == AudioCodec::None {
             return Err(FragmentedError::AudioTrackNotConfigured);
         }
+        validate_visual_dimensions(config.width, config.height)?;
         Ok(Self {
             config,
             audio: Some(audio),
@@ -385,7 +408,7 @@ impl FragmentedMuxer {
         is_sync: bool,
     ) -> Result<(), FragmentedError> {
         if !self.has_video {
-            return Err(FragmentedError::AudioTrackNotConfigured);
+            return Err(FragmentedError::VideoTrackNotConfigured);
         }
         let sample = FragmentSample {
             pts,
@@ -398,8 +421,8 @@ impl FragmentedMuxer {
 
     /// Queue an audio sample for the current fragment (audio-only or two-track muxers).
     ///
-    /// - `pts`: Presentation timestamp in timescale units
-    /// - `dts`: Decode timestamp in timescale units (equal to `pts` for audio)
+    /// - `pts`: Presentation timestamp in audio samples (the audio sample rate)
+    /// - `dts`: Decode timestamp in audio samples (equal to `pts` for audio)
     /// - `data`: Raw encoded audio sample (AAC raw frame or Opus packet)
     ///
     /// Audio samples are always sync samples.
@@ -423,6 +446,24 @@ impl FragmentedMuxer {
             return None;
         }
 
+        let video_fallback = (self.config.timescale / 30).max(1);
+        let audio_fallback = match self.audio.as_ref() {
+            Some(audio) => {
+                let packet = self
+                    .audio_track
+                    .samples
+                    .first()
+                    .map(|sample| sample.data.as_slice())
+                    .unwrap_or(&[]);
+                match audio.codec {
+                    AudioCodec::Opus => opus_packet_samples(packet).unwrap_or(960),
+                    AudioCodec::Aac(_) | AudioCodec::None => 1024,
+                }
+            }
+            None => 1024,
+        };
+        let audio_track_id = if self.has_video { 2 } else { 1 };
+
         // Calculate new base times before taking samples
         let new_video_base = if self.video_track.samples.len() >= 2 {
             let samples = &self.video_track.samples;
@@ -430,7 +471,7 @@ impl FragmentedMuxer {
             let avg_duration = duration_total / (samples.len() as u64 - 1);
             Some(samples.last().unwrap().dts + avg_duration)
         } else if self.video_track.samples.len() == 1 {
-            Some(self.video_track.samples[0].dts + FALLBACK_FRAME_DURATION_TICKS)
+            Some(self.video_track.samples[0].dts + u64::from(video_fallback))
         } else {
             None
         };
@@ -441,7 +482,7 @@ impl FragmentedMuxer {
             let avg_duration = duration_total / (samples.len() as u64 - 1);
             Some(samples.last().unwrap().dts + avg_duration)
         } else if self.audio_track.samples.len() == 1 {
-            Some(self.audio_track.samples[0].dts + FALLBACK_FRAME_DURATION_TICKS)
+            Some(self.audio_track.samples[0].dts + u64::from(audio_fallback))
         } else {
             None
         };
@@ -449,13 +490,16 @@ impl FragmentedMuxer {
         let video_samples = self.video_track.take_samples();
         let audio_samples = self.audio_track.take_samples();
 
-        let segment = build_media_segment(
-            &video_samples,
-            &audio_samples,
-            self.sequence_number,
-            self.video_track.base_media_decode_time,
-            self.audio_track.base_media_decode_time,
-        );
+        let segment = build_media_segment(&MediaSegment {
+            video_samples: &video_samples,
+            audio_samples: &audio_samples,
+            sequence_number: self.sequence_number,
+            video_base_time: self.video_track.base_media_decode_time,
+            audio_base_time: self.audio_track.base_media_decode_time,
+            audio_track_id,
+            video_fallback,
+            audio_fallback,
+        });
 
         // Update state for next segment
         self.sequence_number += 1;
@@ -556,7 +600,7 @@ fn build_moov_fmp4(
         payload.extend_from_slice(&trak);
     }
     if let Some(audio_config) = audio {
-        let trak = build_audio_trak_fmp4(config, audio_config, audio_track_id);
+        let trak = build_audio_trak_fmp4(audio_config, audio_track_id);
         payload.extend_from_slice(&trak);
     }
 
@@ -686,11 +730,7 @@ fn build_hdlr_video() -> Vec<u8> {
     build_box(b"hdlr", &payload)
 }
 
-fn build_audio_trak_fmp4(
-    config: &FragmentConfig,
-    audio: &FragmentAudioConfig,
-    track_id: u32,
-) -> Vec<u8> {
+fn build_audio_trak_fmp4(audio: &FragmentAudioConfig, track_id: u32) -> Vec<u8> {
     let mut payload = Vec::new();
 
     // tkhd (track header)
@@ -698,7 +738,7 @@ fn build_audio_trak_fmp4(
     payload.extend_from_slice(&tkhd);
 
     // mdia (media)
-    let mdia = build_audio_mdia_fmp4(config, audio);
+    let mdia = build_audio_mdia_fmp4(audio);
     payload.extend_from_slice(&mdia);
 
     build_box(b"trak", &payload)
@@ -729,11 +769,11 @@ fn build_audio_tkhd_fmp4(track_id: u32) -> Vec<u8> {
     build_box(b"tkhd", &payload)
 }
 
-fn build_audio_mdia_fmp4(config: &FragmentConfig, audio: &FragmentAudioConfig) -> Vec<u8> {
+fn build_audio_mdia_fmp4(audio: &FragmentAudioConfig) -> Vec<u8> {
     let mut payload = Vec::new();
 
-    // mdhd (media header)
-    let mdhd = build_mdhd_fmp4(config.timescale, None);
+    // mdhd timescale is the audio sample rate. Sample timestamps are in samples.
+    let mdhd = build_mdhd_fmp4(audio.sample_rate.max(1), None);
     payload.extend_from_slice(&mdhd);
 
     // hdlr (handler)
@@ -1018,28 +1058,34 @@ fn build_hvcc_fmp4(config: &FragmentConfig) -> Vec<u8> {
     let mut payload = vec![
         1,     // configuration_version
         byte1, // general_profile_space/tier/idc
-        0x60,
-        0x00,
-        0x00,
-        0x00, // general_profile_compatibility_flags (Main profile)
-        0x90,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00, // general_constraint_indicator_flags
-        general_level_idc,
-        0xf0,
-        0x00, // min_spatial_segmentation_idc (reserved=0xf + 12-bit value=0)
+    ];
+    if let Some(ptl) = hevc.general_profile_tier_level() {
+        payload.extend_from_slice(&ptl[1..12]);
+    } else {
+        payload.extend_from_slice(&[
+            0x60,
+            0x00,
+            0x00,
+            0x00, // compatibility flags
+            0x90,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00, // constraint indicator
+            general_level_idc,
+        ]);
+    }
+    payload.extend_from_slice(&[
+        0xf0, 0x00, // min_spatial_segmentation_idc (reserved=0xf + 12-bit value=0)
         0xfc, // parallelismType (reserved=0xfc)
         0xfd, // chromaFormat (reserved=0xfc | 4:2:0)
         0xf8, // bitDepthLumaMinus8 (reserved=0xf8 | 0)
         0xf8, // bitDepthChromaMinus8 (reserved=0xf8 | 0)
-        0,
-        0,    // avgFrameRate (unspecified)
+        0, 0,    // avgFrameRate (unspecified)
         0x07, // constantFrameRate=0, numTemporalLayers=0, temporalIdNested=1, lengthSizeMinusOne=3
         num_arrays,
-    ];
+    ]);
 
     // VPS array
     if let Some(vps) = &config.vps {
@@ -1180,88 +1226,86 @@ fn build_vpcc_fmp4(config: &FragmentConfig) -> Vec<u8> {
 // Media segment building (moof + mdat)
 // ============================================================================
 
-// ============================================================================
-// Media segment building (moof + mdat)
-// ============================================================================
-
-fn build_media_segment(
-    video_samples: &[FragmentSample],
-    audio_samples: &[FragmentSample],
+struct MediaSegment<'a> {
+    video_samples: &'a [FragmentSample],
+    audio_samples: &'a [FragmentSample],
     sequence_number: u32,
     video_base_time: u64,
     audio_base_time: u64,
-) -> Vec<u8> {
-    // Calculate total mdat size
-    let mdat_payload_size: usize = video_samples.iter().map(|s| s.data.len()).sum::<usize>()
-        + audio_samples.iter().map(|s| s.data.len()).sum::<usize>();
-
-    // Build moof first to get its size (with two tracks)
-    let moof = build_moof_with_offset(
-        video_samples,
-        audio_samples,
-        sequence_number,
-        video_base_time,
-        audio_base_time,
-        0,
-    );
-    let moof_size = moof.len() as u32;
-
-    // Data offset is moof_size + mdat_header(8)
-    let data_offset = moof_size + 8;
-
-    // Rebuild moof with correct data offset
-    let moof = build_moof_with_offset(
-        video_samples,
-        audio_samples,
-        sequence_number,
-        video_base_time,
-        audio_base_time,
-        data_offset,
-    );
-
-    // Build mdat
-    let mut segment = Vec::with_capacity(moof.len() + 8 + mdat_payload_size);
-    segment.extend_from_slice(&moof);
-
-    // mdat header
-    let mdat_size = (8 + mdat_payload_size) as u32;
-    segment.extend_from_slice(&mdat_size.to_be_bytes());
-    segment.extend_from_slice(b"mdat");
-
-    // mdat payload (all sample data, video first then audio)
-    for sample in video_samples {
-        segment.extend_from_slice(&sample.data);
-    }
-    for sample in audio_samples {
-        segment.extend_from_slice(&sample.data);
-    }
-
-    segment
+    audio_track_id: u32,
+    video_fallback: u32,
+    audio_fallback: u32,
 }
 
-fn build_moof_with_offset(
-    video_samples: &[FragmentSample],
-    audio_samples: &[FragmentSample],
-    sequence_number: u32,
-    video_base_time: u64,
-    audio_base_time: u64,
-    data_offset: u32,
+fn build_media_segment(segment: &MediaSegment<'_>) -> Vec<u8> {
+    let mdat_payload_size: usize = segment
+        .video_samples
+        .iter()
+        .map(|sample| sample.data.len())
+        .sum::<usize>()
+        + segment
+            .audio_samples
+            .iter()
+            .map(|sample| sample.data.len())
+            .sum::<usize>();
+    let video_payload_len: u32 = segment
+        .video_samples
+        .iter()
+        .map(|sample| sample.data.len() as u32)
+        .sum();
+
+    // Offsets are fixed-width fields, so the probe moof has the same size as the final one.
+    let probe = build_moof(segment, 0, 0);
+    let data_base = probe.len() as u32 + 8;
+    let moof = build_moof(segment, data_base, data_base + video_payload_len);
+
+    let mut bytes = Vec::with_capacity(moof.len() + 8 + mdat_payload_size);
+    bytes.extend_from_slice(&moof);
+
+    let mdat_size = (8 + mdat_payload_size) as u32;
+    bytes.extend_from_slice(&mdat_size.to_be_bytes());
+    bytes.extend_from_slice(b"mdat");
+
+    for sample in segment.video_samples {
+        bytes.extend_from_slice(&sample.data);
+    }
+    for sample in segment.audio_samples {
+        bytes.extend_from_slice(&sample.data);
+    }
+
+    bytes
+}
+
+fn build_moof(
+    segment: &MediaSegment<'_>,
+    video_data_offset: u32,
+    audio_data_offset: u32,
 ) -> Vec<u8> {
     let mut payload = Vec::new();
 
-    // mfhd (movie fragment header)
-    let mfhd = build_mfhd(sequence_number);
+    let mfhd = build_mfhd(segment.sequence_number);
     payload.extend_from_slice(&mfhd);
 
-    // traf for video track (track_id=1)
-    if !video_samples.is_empty() {
-        let traf = build_traf(video_samples, video_base_time, data_offset, 1);
+    // Video is always track 1. Audio is track 1 only when the muxer has no video track.
+    if !segment.video_samples.is_empty() {
+        let traf = build_traf(
+            segment.video_samples,
+            segment.video_base_time,
+            video_data_offset,
+            1,
+            segment.video_fallback,
+        );
         payload.extend_from_slice(&traf);
     }
 
-    // traf for audio track (track_id=2)
-    if !audio_samples.is_empty() {
-        let traf = build_traf(audio_samples, audio_base_time, data_offset, 2);
+    if !segment.audio_samples.is_empty() {
+        let traf = build_traf(
+            segment.audio_samples,
+            segment.audio_base_time,
+            audio_data_offset,
+            segment.audio_track_id,
+            segment.audio_fallback,
+        );
         payload.extend_from_slice(&traf);
     }
 
@@ -1280,6 +1324,7 @@ fn build_traf(
     base_media_decode_time: u64,
     data_offset: u32,
     track_id: u32,
+    fallback_duration: u32,
 ) -> Vec<u8> {
     let mut payload = Vec::new();
 
@@ -1292,7 +1337,7 @@ fn build_traf(
     payload.extend_from_slice(&tfdt);
 
     // trun (track run)
-    let trun = build_trun(samples, data_offset);
+    let trun = build_trun(samples, data_offset, fallback_duration);
     payload.extend_from_slice(&trun);
 
     build_box(b"traf", &payload)
@@ -1314,7 +1359,7 @@ fn build_tfdt(base_media_decode_time: u64) -> Vec<u8> {
     build_box(b"tfdt", &payload)
 }
 
-fn build_trun(samples: &[FragmentSample], data_offset: u32) -> Vec<u8> {
+fn build_trun(samples: &[FragmentSample], data_offset: u32, fallback_duration: u32) -> Vec<u8> {
     // Flags:
     // 0x000001 = data-offset-present
     // 0x000100 = sample-duration-present
@@ -1338,7 +1383,7 @@ fn build_trun(samples: &[FragmentSample], data_offset: u32) -> Vec<u8> {
             // Use previous duration for last sample
             (sample.dts - samples[i - 1].dts) as u32
         } else {
-            FALLBACK_FRAME_DURATION_TICKS as u32 // 1 frame at 30fps
+            fallback_duration
         };
         payload.extend_from_slice(&duration.to_be_bytes());
 
@@ -1418,11 +1463,11 @@ pub struct AsyncFragmentedMuxer<W: tokio::io::AsyncWrite + Unpin> {
 #[cfg(feature = "async")]
 impl<W: tokio::io::AsyncWrite + Unpin> AsyncFragmentedMuxer<W> {
     /// Create a new async fragmented muxer with the given configuration.
-    pub fn new(config: FragmentConfig, writer: W) -> Self {
-        Self {
-            muxer: FragmentedMuxer::new(config),
+    pub fn new(config: FragmentConfig, writer: W) -> Result<Self, FragmentedError> {
+        Ok(Self {
+            muxer: FragmentedMuxer::new(config)?,
             writer: AsyncWriter::new(writer),
-        }
+        })
     }
 
     /// Get the initialization segment (ftyp + moov).
@@ -1491,7 +1536,7 @@ mod tests {
     #[test]
     fn init_segment_contains_ftyp_moov() {
         let config = FragmentConfig::new(1920, 1080, 90000);
-        let mut muxer = FragmentedMuxer::new(config);
+        let mut muxer = FragmentedMuxer::new(config).unwrap();
         let init = muxer.init_segment();
 
         // Check ftyp
@@ -1505,7 +1550,7 @@ mod tests {
     #[test]
     fn init_segment_is_cached_after_first_call() {
         let config = FragmentConfig::new(1920, 1080, 90000);
-        let mut muxer = FragmentedMuxer::new(config);
+        let mut muxer = FragmentedMuxer::new(config).unwrap();
         let init1 = muxer.init_segment();
         let init2 = muxer.init_segment();
         assert_eq!(init1, init2);
@@ -1514,7 +1559,7 @@ mod tests {
     #[test]
     fn media_segment_contains_moof_mdat() {
         let config = FragmentConfig::new(1920, 1080, 90000);
-        let mut muxer = FragmentedMuxer::new(config);
+        let mut muxer = FragmentedMuxer::new(config).unwrap();
 
         // Write some samples
         let sample_data = vec![0x00, 0x00, 0x00, 0x05, 0x65, 0xaa, 0xbb, 0xcc, 0xdd];
@@ -1534,7 +1579,7 @@ mod tests {
     #[test]
     fn ready_to_flush_tracks_sample_count_and_duration() {
         let config = FragmentConfig::new(1920, 1080, 90000).with_fragment_duration_ms(1);
-        let mut muxer = FragmentedMuxer::new(config);
+        let mut muxer = FragmentedMuxer::new(config).unwrap();
 
         assert!(!muxer.ready_to_flush(), "empty should not be ready");
 
@@ -1553,7 +1598,7 @@ mod tests {
     #[test]
     fn tfdt_base_decode_time_advances_between_segments() {
         let config = FragmentConfig::new(1920, 1080, 90000);
-        let mut muxer = FragmentedMuxer::new(config);
+        let mut muxer = FragmentedMuxer::new(config).unwrap();
 
         let sample_data = vec![0, 0, 0, 5, 0x65, 1, 2, 3, 4];
         muxer.write_video(0, 0, &sample_data, true).unwrap();
@@ -1575,7 +1620,7 @@ mod tests {
     #[test]
     fn trun_single_sample_uses_default_duration_3000() {
         let config = FragmentConfig::new(1920, 1080, 90000);
-        let mut muxer = FragmentedMuxer::new(config);
+        let mut muxer = FragmentedMuxer::new(config).unwrap();
 
         let sample_data = vec![0, 0, 0, 5, 0x65, 1, 2, 3, 4];
         muxer.write_video(0, 0, &sample_data, true).unwrap();
@@ -1590,18 +1635,16 @@ mod tests {
     #[test]
     fn flush_returns_none_when_empty() {
         let config = FragmentConfig::new(1920, 1080, 90000);
-        let mut muxer = FragmentedMuxer::new(config);
+        let mut muxer = FragmentedMuxer::new(config).unwrap();
         assert!(muxer.flush_segment().is_none());
     }
 
     #[cfg(feature = "async")]
     #[tokio::test]
     async fn async_fragmented_muxer_flushes_segment() {
-        use tokio::io::AsyncWriteExt;
-
         let config = FragmentConfig::new(1920, 1080, 90000);
         let mut buf = Vec::new();
-        let mut muxer = AsyncFragmentedMuxer::new(config, &mut buf);
+        let mut muxer = AsyncFragmentedMuxer::new(config, &mut buf).unwrap();
 
         let sample_data = vec![0u8; 100];
         muxer.write_video(0, 0, &sample_data, true).unwrap();
@@ -1609,13 +1652,13 @@ mod tests {
 
         let written = muxer.flush_segment().await.unwrap();
         assert!(written > 0);
-        assert!(buf.len() > 0);
+        assert!(!buf.is_empty());
     }
 
     #[test]
     fn write_audio_on_video_muxer_returns_error() {
         let config = FragmentConfig::new(1920, 1080, 90000);
-        let mut muxer = FragmentedMuxer::new(config);
+        let mut muxer = FragmentedMuxer::new(config).unwrap();
         let result = muxer.write_audio(0, 0, &[0u8; 10]);
         assert!(result.is_err());
         assert!(matches!(
@@ -1733,13 +1776,15 @@ mod tests {
         };
         let mut muxer = FragmentedMuxer::new_with_audio(config, audio).unwrap();
 
-        let audio_data = vec![0u8; 50];
-
-        // Write first batch of frames (exceeds fragment_duration)
+        // Video ticks are 90 kHz. Audio ticks are samples at 48 kHz.
+        // 9000/90000 and 4800/48000 are both 100 ms.
         for i in 0..5 {
-            let pts = (i * 9000) as u64;
-            muxer.write_video(pts, pts, &[0u8; 100], i == 0).unwrap();
-            muxer.write_audio(pts, pts, &[0u8; 50]).unwrap();
+            let video_pts = (i * 9000) as u64;
+            let audio_pts = (i * 4800) as u64;
+            muxer
+                .write_video(video_pts, video_pts, &[0u8; 100], i == 0)
+                .unwrap();
+            muxer.write_audio(audio_pts, audio_pts, &[0u8; 50]).unwrap();
         }
 
         // Flush first segment
@@ -1748,9 +1793,12 @@ mod tests {
 
         // Write second batch
         for i in 5..10 {
-            let pts = (i * 9000) as u64;
-            muxer.write_video(pts, pts, &[0u8; 100], false).unwrap();
-            muxer.write_audio(pts, pts, &[0u8; 50]).unwrap();
+            let video_pts = (i * 9000) as u64;
+            let audio_pts = (i * 4800) as u64;
+            muxer
+                .write_video(video_pts, video_pts, &[0u8; 100], false)
+                .unwrap();
+            muxer.write_audio(audio_pts, audio_pts, &[0u8; 50]).unwrap();
         }
 
         // Flush second segment
@@ -1760,5 +1808,111 @@ mod tests {
         // Verify we got two segments worth of data
         // The muxer should be ready for a third segment but we only wrote two batches
         assert!(!muxer.ready_to_flush(), "no samples left after two flushes");
+    }
+
+    #[test]
+    fn audio_only_write_video_is_video_error() {
+        let audio = FragmentAudioConfig {
+            codec: AudioCodec::Aac(AacProfile::Lc),
+            sample_rate: 48_000,
+            channels: 2,
+        };
+        let mut muxer = FragmentedMuxer::new_audio_only(audio).unwrap();
+        let err = muxer.write_video(0, 0, &[1, 2, 3], true).unwrap_err();
+        assert!(matches!(err, FragmentedError::VideoTrackNotConfigured));
+        let rendered = err.to_string();
+        assert!(
+            !rendered.contains("audio-only"),
+            "display must not claim this is an audio-only-only API: {rendered}"
+        );
+    }
+
+    fn collect_payloads<'a>(data: &'a [u8], typ: &[u8; 4], out: &mut Vec<&'a [u8]>) {
+        let mut pos = 0;
+        while pos + 8 <= data.len() {
+            let size = u32::from_be_bytes(data[pos..pos + 4].try_into().unwrap()) as usize;
+            if size < 8 || pos + size > data.len() {
+                break;
+            }
+            let payload = &data[pos + 8..pos + size];
+            if &data[pos + 4..pos + 8] == typ {
+                out.push(payload);
+            }
+            collect_payloads(payload, typ, out);
+            pos += size;
+        }
+    }
+
+    #[test]
+    fn two_track_audio_mdhd_uses_sample_rate() {
+        let config = FragmentConfig::new(1920, 1080, 90_000);
+        let audio = FragmentAudioConfig {
+            codec: AudioCodec::Aac(AacProfile::Lc),
+            sample_rate: 48_000,
+            channels: 2,
+        };
+        let mut muxer = FragmentedMuxer::new_with_audio(config, audio).unwrap();
+        let init = muxer.init_segment();
+        let mut mdhds = Vec::new();
+        collect_payloads(&init, b"mdhd", &mut mdhds);
+        assert_eq!(mdhds.len(), 2, "video and audio each have an mdhd");
+        let video_timescale = u32::from_be_bytes(mdhds[0][12..16].try_into().unwrap());
+        let audio_timescale = u32::from_be_bytes(mdhds[1][12..16].try_into().unwrap());
+        assert_eq!(video_timescale, 90_000);
+        assert_eq!(audio_timescale, 48_000);
+
+        muxer.write_audio(0, 0, &[0u8; 16]).unwrap();
+        let segment = muxer.flush_segment().unwrap();
+        let trun_off = find_box_offset(&segment, b"trun").expect("trun");
+        let duration = read_u32_be(&segment, trun_off + 20);
+        assert_eq!(
+            duration, 1024,
+            "a single AAC sample is 1024 samples, not 3000 ticks"
+        );
+
+        let opus = FragmentAudioConfig {
+            codec: AudioCodec::Opus,
+            sample_rate: 48_000,
+            channels: 2,
+        };
+        let mut opus_mux =
+            FragmentedMuxer::new_with_audio(FragmentConfig::new(320, 240, 90_000), opus).unwrap();
+        opus_mux.write_audio(0, 0, &[]).unwrap();
+        let opus_segment = opus_mux.flush_segment().unwrap();
+        let opus_trun = find_box_offset(&opus_segment, b"trun").expect("opus trun");
+        assert_eq!(read_u32_be(&opus_segment, opus_trun + 20), 960);
+    }
+
+    #[test]
+    fn two_track_audio_trun_offset_follows_video_payload() {
+        let config = FragmentConfig::new(320, 240, 90_000);
+        let audio = FragmentAudioConfig {
+            codec: AudioCodec::Aac(AacProfile::Lc),
+            sample_rate: 48_000,
+            channels: 2,
+        };
+        let mut muxer = FragmentedMuxer::new_with_audio(config, audio).unwrap();
+        let video = vec![0u8; 100];
+        let audio_bytes = vec![0u8; 50];
+        muxer.write_video(0, 0, &video, true).unwrap();
+        muxer.write_video(3000, 3000, &video, false).unwrap();
+        muxer.write_audio(0, 0, &audio_bytes).unwrap();
+        muxer.write_audio(1024, 1024, &audio_bytes).unwrap();
+        let segment = muxer.flush_segment().unwrap();
+
+        let mut tfhds = Vec::new();
+        collect_payloads(&segment, b"tfhd", &mut tfhds);
+        assert_eq!(tfhds.len(), 2);
+        let video_track = u32::from_be_bytes(tfhds[0][4..8].try_into().unwrap());
+        let audio_track = u32::from_be_bytes(tfhds[1][4..8].try_into().unwrap());
+        assert_eq!(video_track, 1);
+        assert_eq!(audio_track, 2);
+
+        let mut truns = Vec::new();
+        collect_payloads(&segment, b"trun", &mut truns);
+        assert_eq!(truns.len(), 2);
+        let video_off = u32::from_be_bytes(truns[0][8..12].try_into().unwrap());
+        let audio_off = u32::from_be_bytes(truns[1][8..12].try_into().unwrap());
+        assert_eq!(audio_off, video_off + 200);
     }
 }

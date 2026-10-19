@@ -127,7 +127,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         vp9_config: None,
     };
 
-    let mut fmux = FragmentedMuxer::new(cfg);
+    let mut fmux = FragmentedMuxer::new(cfg)?;
     let init = fmux.init_segment();
 
     let dt = 3000u64;

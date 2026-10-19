@@ -297,26 +297,27 @@ fn parse_sequence_header(obu_data: &[u8], header_size: usize) -> Option<Av1Confi
     } else {
         // timing_info_present_flag: 1 bit
         let timing_info_present = reader.read_bit()?;
-        if timing_info_present {
-            // Skip timing_info
+        // decoder_model_info_present_flag exists only when timing_info_present_flag
+        // is 1 (AV1 spec 5.5.1). Otherwise it is inferred as 0 and consumes no bits.
+        let mut buffer_delay_length = 0;
+        let decoder_model_info_present = if timing_info_present {
             reader.skip_bits(32)?; // num_units_in_display_tick
             reader.skip_bits(32)?; // time_scale
             let equal_picture_interval = reader.read_bit()?;
             if equal_picture_interval {
-                // Skip num_ticks_per_picture_minus_1 (uvlc)
                 skip_uvlc(&mut reader)?;
             }
-        }
-
-        // decoder_model_info_present_flag: 1 bit
-        let decoder_model_info_present = reader.read_bit()?;
-        let mut buffer_delay_length = 0;
-        if decoder_model_info_present {
-            buffer_delay_length = reader.read_bits(5)? as u8 + 1;
-            reader.skip_bits(32)?; // num_units_in_decoding_tick
-            reader.skip_bits(5)?; // buffer_removal_time_length
-            reader.skip_bits(5)?; // frame_presentation_time_length
-        }
+            let decoder_model_info_present = reader.read_bit()?;
+            if decoder_model_info_present {
+                buffer_delay_length = reader.read_bits(5)? as u8 + 1;
+                reader.skip_bits(32)?; // num_units_in_decoding_tick
+                reader.skip_bits(5)?; // buffer_removal_time_length
+                reader.skip_bits(5)?; // frame_presentation_time_length
+            }
+            decoder_model_info_present
+        } else {
+            false
+        };
 
         // initial_display_delay_present_flag: 1 bit
         let initial_display_delay_present = reader.read_bit()?;
@@ -900,5 +901,52 @@ mod tests {
         assert!(!cfg.high_bitdepth);
         assert!(!cfg.twelve_bit);
         assert!(!cfg.monochrome);
+    }
+
+    /// Regression: `decoder_model_info_present_flag` is absent when timing info
+    /// is absent. Fixture captured from rav1e 0.8.1 (64x32). Credit: thoroc, PR #9.
+    #[test]
+    fn test_parse_sequence_header_matches_real_rav1e_output() {
+        let seq_header = [
+            0x0A, 0x0A, 0x00, 0x00, 0x00, 0xf9, 0x53, 0xff, 0x88, 0x42, 0xb0, 0x28,
+        ];
+
+        let config = parse_sequence_header(&seq_header[2..], 0);
+        let cfg = config.expect("a genuine rav1e sequence header must parse");
+        assert_eq!(cfg.seq_profile, 0);
+        assert_eq!(
+            frame_dimensions_for_test(&seq_header[2..]),
+            (64, 32),
+            "misaligned parsing would derive implausible dimensions for this 64x32 stream"
+        );
+    }
+
+    fn frame_dimensions_for_test(payload: &[u8]) -> (u64, u64) {
+        let mut reader = BitReader::new(payload);
+        let _seq_profile = reader.read_bits(3).unwrap();
+        let _still_picture = reader.read_bit().unwrap();
+        let reduced = reader.read_bit().unwrap();
+        assert!(!reduced, "test helper only supports the non-reduced path");
+
+        let timing_info_present = reader.read_bit().unwrap();
+        assert!(
+            !timing_info_present,
+            "test helper only supports timing_info absent"
+        );
+
+        let _initial_display_delay_present = reader.read_bit().unwrap();
+        let op_cnt = reader.read_bits(5).unwrap() + 1;
+        for _ in 0..op_cnt {
+            reader.skip_bits(12).unwrap();
+            let level_idx = reader.read_bits(5).unwrap();
+            if level_idx > 7 {
+                reader.read_bit().unwrap();
+            }
+        }
+        let frame_width_bits = reader.read_bits(4).unwrap() as usize + 1;
+        let frame_height_bits = reader.read_bits(4).unwrap() as usize + 1;
+        let max_width = reader.read_bits(frame_width_bits).unwrap() + 1;
+        let max_height = reader.read_bits(frame_height_bits).unwrap() + 1;
+        (max_width, max_height)
     }
 }

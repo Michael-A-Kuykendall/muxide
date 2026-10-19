@@ -53,7 +53,7 @@ Bug reports via GitHub Issues are welcome! Please include:
 If invited:
 - Rust 2021 edition with `cargo fmt` and `cargo clippy`
 - Minimal runtime dependencies (only std and essential crates)
-- MSRV 1.74 compatibility
+- MSRV 1.86 compatibility
 - Property-based tests for new functionality
 - All public APIs must have documentation
 
@@ -61,7 +61,7 @@ If invited:
 
 Any accepted work must align with:
 - **Minimal dependencies**: Only std and essential crates at runtime
-- **Pure Rust**: No unsafe, no FFI
+- **Pure Rust core**: the muxer is safe Rust. `unsafe` is confined to the optional C FFI in `src/ffi.rs`. WASM bindings are a separate feature.
 - **Strict validation**: Garbage in, error out
 - **Standards compliance**: Valid ISO-BMFF output
 - **MIT OR Apache-2.0 licensed**: No GPL contamination

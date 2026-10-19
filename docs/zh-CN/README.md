@@ -84,7 +84,10 @@ Muxide 强制执行严格的契约：
 | | Opus | 原始包，48kHz |
 | **容器** | Fast-start | `moov` 位于 `mdat` 之前，适合网页播放 |
 | | B 帧 | 显式 PTS/DTS 支持 |
-| | 分片 MP4 | 用于 DASH/HLS 流式传输 |
+| | 分片 MP4 | 仅视频、仅音频，或两条轨，用于 DASH/HLS |
+| | 仅音频 | 无视频轨的渐进式 MP4 与 fMP4 |
+| | 章节 | `udta` 中的 `chpl` box |
+| | DASH MPD | `muxide::dash` 从 fMP4 输出生成静态 MPD |
 | | 元数据 | 标题、创建时间、语言 |
 | **质量** | 详细错误报告 | 十六进制 dump、JSON 输出、可操作的错误信息 |
 | | 生产就绪 | 已验证与 FFmpeg 兼容 |

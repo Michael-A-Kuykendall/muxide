@@ -301,6 +301,17 @@ fn audio_only_fmp4_init_segment_contains_audio_trak_and_mvex() {
     let seg_boxes = parse_top_level_boxes(&segment);
     let seg_types: Vec<&str> = seg_boxes.iter().map(|(t, _, _)| t.as_str()).collect();
     assert_eq!(seg_types, vec!["moof", "mdat"]);
+
+    // The media segment's tfhd must name the same track as the init trex (1).
+    let tfhd_pos = segment
+        .windows(4)
+        .position(|w| w == b"tfhd")
+        .expect("tfhd fourcc");
+    let tfhd_track = u32::from_be_bytes(segment[tfhd_pos + 8..tfhd_pos + 12].try_into().unwrap());
+    assert_eq!(
+        tfhd_track, 1,
+        "audio-only moof must use track id 1, matching trex"
+    );
 }
 
 #[test]

@@ -513,6 +513,12 @@ fn mux_command(
         );
     }
 
+    if audio.is_some() && (sample_rate.is_none() || channels.is_none()) {
+        anyhow::bail!(
+            "Audio parameters --sample-rate and --channels are required when using --audio"
+        );
+    }
+
     // For dry run, validate inputs but don't create output
     if dry_run {
         if verbose {
@@ -671,7 +677,8 @@ fn mux_command(
             _ => true,
         };
 
-        let mut fmp4 = FragmentedMuxer::new(config);
+        let mut fmp4 = FragmentedMuxer::new(config)
+            .map_err(|err| anyhow::anyhow!("Failed to create fragmented muxer: {err}"))?;
 
         let init = fmp4.init_segment();
         output_file

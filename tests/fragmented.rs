@@ -17,7 +17,7 @@ fn test_fragmented_dts_must_be_monotonic() {
         vp9_config: None,
     };
 
-    let mut muxer = FragmentedMuxer::new(config);
+    let mut muxer = FragmentedMuxer::new(config).unwrap();
 
     // First sample OK
     let data = vec![0x00, 0x00, 0x00, 0x04, 0x65, 0x01, 0x02, 0x03];
@@ -54,7 +54,7 @@ fn test_fragmented_basic_functionality() {
         vp9_config: None,
     };
 
-    let mut muxer = FragmentedMuxer::new(config);
+    let mut muxer = FragmentedMuxer::new(config).unwrap();
 
     // Get init segment
     let init = muxer.init_segment();
@@ -103,7 +103,7 @@ fn test_fragmented_h265_basic() {
         vp9_config: None,
     };
 
-    let mut muxer = FragmentedMuxer::new(config);
+    let mut muxer = FragmentedMuxer::new(config).unwrap();
 
     // Get init segment - should contain hvc1 sample entry
     let init = muxer.init_segment();
@@ -151,7 +151,7 @@ fn test_fragmented_av1_basic() {
         vp9_config: None,
     };
 
-    let mut muxer = FragmentedMuxer::new(config);
+    let mut muxer = FragmentedMuxer::new(config).unwrap();
 
     // Get init segment - should contain av01 sample entry
     let init = muxer.init_segment();
@@ -199,7 +199,7 @@ fn test_fragmented_vp9_basic() {
         vp9_config: Some(vp9_config),
     };
 
-    let mut muxer = FragmentedMuxer::new(config);
+    let mut muxer = FragmentedMuxer::new(config).unwrap();
 
     // Get init segment - should contain vp09 sample entry
     let init = muxer.init_segment();
