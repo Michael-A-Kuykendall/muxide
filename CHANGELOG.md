@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Release-mode `cargo test` no longer expects the debug-only invariant log. A false `assert_invariant!` still panics in release builds.
+
 ## 0.5.0 (October 19, 2026) - Playback correctness
 
 ### ✨ New Features

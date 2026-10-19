@@ -75,21 +75,32 @@ pub fn __assert_invariant_impl(condition: bool, message: &str, context: Option<&
 /// # Panics
 /// Panics if any required invariant was not checked.
 pub fn contract_test(test_name: &str, required_invariants: &[&str]) {
-    let log = INVARIANT_LOG.with(|log| log.borrow().clone());
-
-    let mut missing: Vec<&str> = Vec::new();
-    for invariant in required_invariants {
-        if !log.contains(*invariant) {
-            missing.push(invariant);
-        }
+    // The invariant log is compiled out of release builds, so there is
+    // nothing to verify there. A false `assert_invariant!` still panics.
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = (test_name, required_invariants);
+        return;
     }
 
-    if !missing.is_empty() {
-        panic!(
-            "CONTRACT FAILURE [{}]: The following invariants were not checked:\n  - {}",
-            test_name,
-            missing.join("\n  - ")
-        );
+    #[cfg(debug_assertions)]
+    {
+        let log = INVARIANT_LOG.with(|log| log.borrow().clone());
+
+        let mut missing: Vec<&str> = Vec::new();
+        for invariant in required_invariants {
+            if !log.contains(*invariant) {
+                missing.push(invariant);
+            }
+        }
+
+        if !missing.is_empty() {
+            panic!(
+                "CONTRACT FAILURE [{}]: The following invariants were not checked:\n  - {}",
+                test_name,
+                missing.join("\n  - ")
+            );
+        }
     }
 }
 
@@ -115,10 +126,13 @@ mod tests {
 
         assert_invariant!(true, "poisoned invariant");
 
-        contract_test("poisoned", &["poisoned invariant"]);
-
-        let logged = get_logged_invariants();
-        assert!(logged.contains(&"poisoned invariant".to_string()));
+        // The panic is not debug-gated. Only the log is.
+        #[cfg(debug_assertions)]
+        {
+            contract_test("poisoned", &["poisoned invariant"]);
+            let logged = get_logged_invariants();
+            assert!(logged.contains(&"poisoned invariant".to_string()));
+        }
     }
 
     #[test]
@@ -126,8 +140,11 @@ mod tests {
         clear_invariant_log();
         assert_invariant!(true, "test invariant passes");
 
-        let logged = get_logged_invariants();
-        assert!(logged.contains(&"test invariant passes".to_string()));
+        #[cfg(debug_assertions)]
+        {
+            let logged = get_logged_invariants();
+            assert!(logged.contains(&"test invariant passes".to_string()));
+        }
     }
 
     #[test]
@@ -140,9 +157,11 @@ mod tests {
     fn test_contract_passes() {
         clear_invariant_log();
         assert_invariant!(true, "contract required invariant");
+        #[cfg(debug_assertions)]
         contract_test("test contract", &["contract required invariant"]);
     }
 
+    #[cfg(debug_assertions)]
     #[test]
     #[should_panic(expected = "CONTRACT FAILURE")]
     fn test_contract_fails_missing() {
